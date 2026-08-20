@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Build one signed Manjaro kernel (embeds personal cert in .builtin_trusted_keys).
+# Usage: signed-kernel-build <linuxNN> [--install]
+#
+# Reclones PKGBUILD from Manjaro GitLab, patches config inject, makepkg builds.
+# With --install: pacman -U's the resulting packages (re-triggers DKMS + sbctl
+# + mkinitcpio via existing pacman hooks — zfs + nvidia auto-rebuild & sign).
+#
+# Kernel is auto-validated: must be installed and match ^linuxNN$ (Manjaro
+# versioned kernels). Any new kernel that pacman installs automatically works —
+# no script edits required.
+
+set -euo pipefail
+
+K="${1:-}"
+INSTALL=0
+[[ "${2:-}" == "--install" ]] && INSTALL=1
+
+# validate: must look like a Manjaro versioned kernel and be installed
+if [[ ! "$K" =~ ^linux[0-9]+$ ]]; then
+    echo "usage: $0 <linuxNN> [--install]  (e.g. linux66, linux612, linux618, linux620)" >&2
+    exit 2
+fi
+if ! pacman -Qi "$K" >/dev/null 2>&1; then
+    echo "error: $K is not installed. Install it first: sudo pacman -S $K $K-headers" >&2
+    exit 2
+fi
+
+CERT=/etc/kernel-signing/combined.pem
+WORKDIR=/home/will/kernel-rebuild
+LOG=/home/will/kernel-rebuild/$K.build.log
+UPSTREAM=https://gitlab.manjaro.org/packages/core/$K.git
+
+[[ -f $CERT ]] || { echo "missing cert: $CERT" >&2; exit 1; }
+mkdir -p "$WORKDIR"
+cd "$WORKDIR"
+
+echo "=== [$K] rebuild started $(date -Iseconds) ==="
+exec > >(tee "$LOG") 2>&1
+
+# fresh clone every run — guarantees we track upstream
+rm -rf "$K"
+# try main first, fall back to master
+if ! git clone --depth 1 "$UPSTREAM" "$K" 2>/dev/null; then
+    echo "clone failed — $K may not exist on Manjaro GitLab" >&2
+    exit 3
+fi
+cd "$K"
+
+# inject CONFIG_SYSTEM_TRUSTED_KEYS path into prepare()
+# match any `cp|cat ../config → .config` line and append our sed right after
+awk -v cert="$CERT" '
+    /\.\.\/config[ "]*[ >]* \.?\/?\.config/ && !seen {
+        print
+        print ""
+        print "  # willsigned: embed personal cert into .builtin_trusted_keys"
+        print "  sed -i \"s|^CONFIG_SYSTEM_TRUSTED_KEYS=.*|CONFIG_SYSTEM_TRUSTED_KEYS=\\\""cert"\\\"|\" .config"
+        print "  # end-willsigned"
+        seen=1
+        next
+    }
+    { print }
+' PKGBUILD > PKGBUILD.new
+\mv PKGBUILD.new PKGBUILD
+
+grep -q willsigned PKGBUILD || { echo "ERROR: patch injection failed for $K"; exit 3; }
+
+echo "=== [$K] makepkg start $(date -Iseconds) ==="
+t0=$(date +%s)
+# no -s: assumes makedepends already present (installed by setup)
+makepkg --noconfirm --skippgpcheck --nocheck
+t1=$(date +%s)
+echo "=== [$K] makepkg done in $(( (t1-t0)/60 ))m ==="
+
+ls -la *.pkg.tar.zst
+
+if (( INSTALL )); then
+    echo "=== [$K] installing via pacman -U ==="
+    # --overwrite allows replacing identical ver-rel (our build vs repo)
+    sudo pacman -U --noconfirm --overwrite='*' *.pkg.tar.zst
+    echo "=== [$K] install done. DKMS + pacman hooks should have auto-fired."
+fi
+
+echo "=== [$K] rebuild finished $(date -Iseconds) ==="

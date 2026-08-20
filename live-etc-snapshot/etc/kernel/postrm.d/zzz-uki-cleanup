@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# /etc/kernel/postrm.d/zzz-uki-cleanup
+# Apt kernel postrm hook — removes the UKI for a removed kernel and
+# unregisters it from sbctl's signed-files database.
+# Invoked by: dpkg, with $1 = kernel version, $2 = vmlinuz path (may be gone by now).
+set -euo pipefail
+
+KVER="${1:-}"
+[[ -n "$KVER" ]] || exit 0
+
+# Locate the UKI dir — same logic as the postinst hook.
+if findmnt /boot >/dev/null 2>&1 && [[ "$(findmnt -no FSTYPE /boot)" == "vfat" ]]; then
+    OUTDIR=/boot/EFI/Linux
+elif findmnt /efi >/dev/null 2>&1; then
+    OUTDIR=/efi/EFI/Linux
+elif findmnt /boot/efi >/dev/null 2>&1; then
+    OUTDIR=/boot/efi/EFI/Linux
+else
+    exit 0
+fi
+
+UKI="$OUTDIR/linuxmint-${KVER}.efi"
+
+# Always unregister from sbctl's db first — even if the .efi is already gone.
+# A kernel removed out-of-band (manual rm, or keep-n-kernels purging it before
+# this hook runs) would otherwise leave an orphaned db entry, and `sbctl verify`
+# then errors on a non-existent file. remove-file is a no-op if not tracked.
+if command -v sbctl >/dev/null; then
+    sbctl remove-file "$UKI" >/dev/null 2>&1 || true
+fi
+
+if [[ -f "$UKI" ]]; then
+    rm -f "$UKI"
+    echo "zzz-uki-cleanup: removed $UKI"
+fi

@@ -1,0 +1,314 @@
+[1mPost-reboot triage — 2026-04-21 04:27 EDT[0m
+
+[1m=== 1. sudo failure diagnosis ===[0m
+--- visudo -c ---
+Warning: /etc/sudoers:31:12: unused Cmnd_Alias "PACMAN"
+/etc/sudoers: parsed OK
+/etc/sudoers.d/10-installer: parsed OK
+/etc/sudoers.d/adguard-toggle: parsed OK
+/etc/sudoers.d/backup: parsed OK
+/etc/sudoers.d/dns-toggle: parsed OK
+/etc/sudoers.d/netcheck: parsed OK
+/etc/sudoers.d/will: parsed OK
+/etc/sudoers.d/zfs: parsed OK
+--- journalctl _COMM=sudo this boot ---
+Apr 21 04:17:51 zen sudo[9117]: pam_unix(sudo:auth): conversation failed
+Apr 21 04:17:51 zen sudo[9117]: pam_unix(sudo:auth): auth could not identify password for [will]
+Apr 21 04:17:54 zen sudo[9159]: pam_unix(sudo:auth): conversation failed
+Apr 21 04:17:54 zen sudo[9159]: pam_unix(sudo:auth): auth could not identify password for [will]
+Apr 21 04:17:55 zen sudo[9170]: pam_unix(sudo:auth): conversation failed
+Apr 21 04:17:55 zen sudo[9170]: pam_unix(sudo:auth): auth could not identify password for [will]
+Apr 21 04:17:55 zen sudo[9170]: pam_faillock(sudo:auth): Consecutive login failures for user will account temporarily locked
+Apr 21 04:17:57 zen sudo[9211]: pam_unix(sudo:auth): conversation failed
+Apr 21 04:17:57 zen sudo[9211]: pam_unix(sudo:auth): auth could not identify password for [will]
+Apr 21 04:17:59 zen sudo[9228]: pam_unix(sudo:auth): conversation failed
+Apr 21 04:17:59 zen sudo[9228]: pam_unix(sudo:auth): auth could not identify password for [will]
+Apr 21 04:18:31 zen sudo[9704]: pam_unix(sudo:auth): conversation failed
+Apr 21 04:18:31 zen sudo[9704]: pam_unix(sudo:auth): auth could not identify password for [will]
+Apr 21 04:18:37 zen sudo[9779]: pam_unix(sudo:auth): conversation failed
+Apr 21 04:18:37 zen sudo[9779]: pam_unix(sudo:auth): auth could not identify password for [will]
+Apr 21 04:19:23 zen sudo[10405]: pam_unix(sudo:auth): conversation failed
+Apr 21 04:19:23 zen sudo[10405]: pam_unix(sudo:auth): auth could not identify password for [will]
+Apr 21 04:19:25 zen sudo[10405]:     will : 1 incorrect password attempt ; TTY=pts/2 ; PWD=/home/will ; USER=root ; COMMAND=validate
+--- pam_audit in stack? ---
+/etc/pam.d/system-auth:auth       [success=1 default=bad]     pam_unix.so          try_first_pass nullok
+/etc/pam.d/system-auth:account    required                    pam_unix.so
+/etc/pam.d/system-auth:password   required                    pam_unix.so          try_first_pass nullok shadow
+/etc/pam.d/system-auth:session    required                    pam_unix.so
+
+[1m=== 2. audit-rules.service (likely culprit) ===[0m
+× audit-rules.service - Load Audit Rules
+     Loaded: loaded (/usr/lib/systemd/system/audit-rules.service; disabled; preset: disabled)
+     Active: failed (Result: exit-code) since Tue 2026-04-21 04:14:30 EDT; 12min ago
+ Invocation: 294528a30c224063a4b938f5923a95bc
+       Docs: man:auditctl(8)
+             https://github.com/linux-audit/audit-documentation
+    Process: 1640 ExecStart=/usr/bin/augenrules --load (code=exited, status=1/FAILURE)
+   Main PID: 1640 (code=exited, status=1/FAILURE)
+   Mem peak: 2.7M
+        CPU: 28ms
+
+Apr 21 04:14:29 zen systemd[1]: Starting Load Audit Rules...
+Apr 21 04:14:30 zen augenrules[1640]: /usr/bin/augenrules: No change
+Apr 21 04:14:30 zen auditctl[1663]: There was an error in line 3 of /etc/audit/audit.rules
+Apr 21 04:14:30 zen augenrules[1663]: No rules
+Apr 21 04:14:30 zen systemd[1]: audit-rules.service: Main process exited, code=exited, status=1/FAILURE
+Apr 21 04:14:30 zen systemd[1]: audit-rules.service: Failed with result 'exit-code'.
+Apr 21 04:14:30 zen systemd[1]: Failed to start Load Audit Rules.
+--- journal ---
+Apr 21 04:14:29 zen systemd[1]: Starting Load Audit Rules...
+Apr 21 04:14:30 zen augenrules[1640]: /usr/bin/augenrules: No change
+Apr 21 04:14:30 zen auditctl[1663]: There was an error in line 3 of /etc/audit/audit.rules
+Apr 21 04:14:30 zen augenrules[1663]: No rules
+Apr 21 04:14:30 zen systemd[1]: audit-rules.service: Main process exited, code=exited, status=1/FAILURE
+Apr 21 04:14:30 zen systemd[1]: audit-rules.service: Failed with result 'exit-code'.
+Apr 21 04:14:30 zen systemd[1]: Failed to start Load Audit Rules.
+--- current audit state ---
+enabled 1
+failure 1
+pid 1636
+rate_limit 0
+backlog_limit 64
+lost 284926
+backlog 1
+backlog_wait_time 60000
+backlog_wait_time_actual 94503
+loginuid_immutable 0 unlocked
+--- hardening.rules content ---
+## Minimal hardening ruleset — 2026-04-21
+## Goal: post-compromise forensics without log flood.
+## Delete on next boot if auditd buffer pressure appears.
+
+## Lose nothing at boot
+-D
+-b 8192
+-f 1
+
+## Identity / credential files
+-w /etc/passwd -p wa -k identity
+-w /etc/shadow -p wa -k identity
+-w /etc/group -p wa -k identity
+-w /etc/gshadow -p wa -k identity
+-w /etc/sudoers -p wa -k scope
+-w /etc/sudoers.d/ -p wa -k scope
+
+## Module load/unload
+-a always,exit -F arch=b64 -S init_module,finit_module,delete_module -k modules
+
+## Privilege escalation
+-a always,exit -F arch=b64 -S execve -C uid!=euid -F euid=0 -k setuid_exec
+-a always,exit -F arch=b64 -S execve -C gid!=egid -F egid=0 -k setgid_exec
+
+## Time / timezone tampering
+-a always,exit -F arch=b64 -S adjtimex,settimeofday,clock_settime -k time
+
+## Kernel parameter tampering
+-w /etc/sysctl.conf -p wa -k sysctl
+-w /etc/sysctl.d/ -p wa -k sysctl
+-w /etc/modprobe.d/ -p wa -k modprobe
+
+## Make rules immutable until reboot
+-e 2
+
+  [33m[fix][0m removing '-e 2' from /etc/audit/rules.d/hardening.rules (makes rules mutable)
+No rules
+Failed to restart auditd.service: Operation refused, unit auditd.service may be requested by dependency only (it is configured to refuse manual start/stop).
+See system logs and 'systemctl status auditd.service' for details.
+Job for audit-rules.service failed because the control process exited with error code.
+See "systemctl status audit-rules.service" and "journalctl -xeu audit-rules.service" for details.
+  [31m[!!][0m audit-rules.service still failing — see journal above
+
+[1m=== 3. systemd-modules-load.service ===[0m
+× systemd-modules-load.service - Load Kernel Modules
+     Loaded: loaded (/usr/lib/systemd/system/systemd-modules-load.service; static)
+     Active: failed (Result: exit-code) since Tue 2026-04-21 04:14:29 EDT; 12min ago
+ Invocation: 99598292c0624cc68831ad29e21123f1
+       Docs: man:systemd-modules-load.service(8)
+             man:modules-load.d(5)
+    Process: 1519 ExecStart=/usr/lib/systemd/systemd-modules-load (code=exited, status=1/FAILURE)
+   Main PID: 1519 (code=exited, status=1/FAILURE)
+   Mem peak: 2.1M
+        CPU: 676ms
+
+Apr 21 04:14:29 zen systemd[1]: Starting Load Kernel Modules...
+Apr 21 04:14:29 zen systemd-modules-load[1519]: Using 6 probe threads
+Apr 21 04:14:29 zen systemd-modules-load[1519]: Module 'nvidia_uvm' is deny-listed (by kmod)
+Apr 21 04:14:29 zen systemd-modules-load[1519]: Failed to insert module 'nvidia_drm': Key was rejected by service
+Apr 21 04:14:29 zen systemd-modules-load[1519]: Failed to insert module 'nvidia': Key was rejected by service
+Apr 21 04:14:29 zen systemd[1]: systemd-modules-load.service: Main process exited, code=exited, status=1/FAILURE
+Apr 21 04:14:29 zen systemd[1]: systemd-modules-load.service: Failed with result 'exit-code'.
+Apr 21 04:14:29 zen systemd[1]: Failed to start Load Kernel Modules.
+--- journal ---
+Apr 21 04:13:03 manjaro systemd-modules-load[172]: Using 5 probe threads
+Apr 21 04:13:03 manjaro systemd-modules-load[172]: Module 'btrfs' is built in
+Apr 21 04:13:03 manjaro systemd-modules-load[172]: Module 'nvidia_uvm' is deny-listed (by kmod)
+Apr 21 04:13:04 manjaro systemd-modules-load[172]: Failed to insert module 'nvidia': Key was rejected by service
+Apr 21 04:13:04 manjaro systemd-modules-load[172]: Failed to insert module 'nvidia_modeset': Key was rejected by service
+Apr 21 04:13:04 manjaro systemd-modules-load[172]: Failed to insert module 'nvidia_drm': Key was rejected by service
+Apr 21 04:13:04 manjaro systemd[1]: systemd-modules-load.service: Main process exited, code=exited, status=1/FAILURE
+Apr 21 04:13:04 manjaro systemd[1]: systemd-modules-load.service: Failed with result 'exit-code'.
+Apr 21 04:13:04 manjaro systemd[1]: Failed to start Load Kernel Modules.
+Apr 21 04:14:29 zen systemd[1]: Starting Load Kernel Modules...
+Apr 21 04:14:29 zen systemd-modules-load[1519]: Using 6 probe threads
+Apr 21 04:14:29 zen systemd-modules-load[1519]: Module 'nvidia_uvm' is deny-listed (by kmod)
+Apr 21 04:14:29 zen systemd-modules-load[1519]: Failed to insert module 'nvidia_drm': Key was rejected by service
+Apr 21 04:14:29 zen systemd-modules-load[1519]: Failed to insert module 'nvidia': Key was rejected by service
+Apr 21 04:14:29 zen systemd[1]: systemd-modules-load.service: Main process exited, code=exited, status=1/FAILURE
+Apr 21 04:14:29 zen systemd[1]: systemd-modules-load.service: Failed with result 'exit-code'.
+Apr 21 04:14:29 zen systemd[1]: Failed to start Load Kernel Modules.
+--- modules-load.d configs ---
+[/etc/modules-load.d]
+total 16
+drwxr-xr-x 1 root root   50 Jan  9 21:58 .
+drwxr-xr-x 1 root root 6056 Apr 21 04:14 ..
+-rw-r--r-- 1 root root   76 Feb  1  2023 mhwd-gpu.conf
+-rw-r--r-- 1 root root   34 Oct 13  2025 modules.conf
+[/usr/lib/modules-load.d]
+total 24
+drwxr-xr-x 1 root root    148 Mar 23 19:32 .
+drwxr-xr-x 1 root root 257216 Apr 21 03:44 ..
+-rw-r--r-- 1 root root     12 Mar  1 05:40 bluez.conf
+-rw-r--r-- 1 root root      3 Jul 20  2024 cdrecord.conf
+-rw-r--r-- 1 root root      8 Mar 10 11:22 ddcutil.conf
+-rw-r--r-- 1 root root      8 Dec 14 08:37 i2c-tools.conf
+-rw-r--r-- 1 root root     11 Feb  2 10:35 nvidia-utils.conf
+-rw-r--r-- 1 root root    152 Feb 25 08:41 zfs.conf
+--- unsigned module rejections this boot ---
+
+Decision: do NOT auto-fix. Identify the module above, then either:
+  (a) sign it with your MOK key and re-run modprobe, or
+  (b) remove from /etc/modules-load.d if it was an optional autoload
+
+[1m=== 4. snapd.service ===[0m
+× snapd.service - Snap Daemon
+     Loaded: loaded (/usr/lib/systemd/system/snapd.service; enabled; preset: disabled)
+     Active: failed (Result: protocol) since Tue 2026-04-21 04:16:54 EDT; 10min ago
+ Invocation: ee57a6d6fe1b40ae8baf29ed10f688d4
+TriggeredBy: ● snapd.socket
+    Process: 3344 ExecStart=/usr/lib/snapd/snapd (code=exited, status=42)
+   Main PID: 3344 (code=exited, status=42)
+   Mem peak: 50.4M
+        CPU: 357ms
+
+Apr 21 04:16:15 zen snapd[3344]: backends.go:70: AppArmor status: apparmor is enabled but some kernel features are missing: network
+Apr 21 04:16:15 zen snapd[3344]: backend.go:145: reloading profiles for snap-confine
+Apr 21 04:16:16 zen snapd[3344]: standby.go:95: will consider standby after: 5s
+Apr 21 04:16:31 zen snapd[3344]: snapmgr.go:1659: performing periodic snap downloads cache cleanup
+Apr 21 04:16:31 zen snapd[3344]: cache.go:243: removed 0 entries/    0 from downloads cache
+Apr 21 04:16:51 zen snapd[3344]: standby.go:101: standby conditions met, initiating standby...
+Apr 21 04:16:51 zen snapd[3344]: daemon.go:556: gracefully waiting for running hooks
+Apr 21 04:16:51 zen snapd[3344]: daemon.go:558: done waiting for running hooks
+Apr 21 04:16:54 zen snapd[3344]: standby.go:121: standby monitoring stop requested
+Apr 21 04:16:54 zen snapd[3344]: overlord.go:543: Released state lock file
+Apr 21 04:16:54 zen snapd[3344]: daemon stop requested to wait for socket activation
+Apr 21 04:16:54 zen systemd[1]: snapd.service: Failed with result 'protocol'.
+Apr 21 04:16:54 zen systemd[1]: Failed to start Snap Daemon.
+Apr 21 04:16:54 zen systemd[1]: snapd.service: Triggering OnFailure= dependencies.
+Apr 21 04:16:54 zen systemd[1]: snapd.service: Failed to enqueue OnFailure=snapd.failure.service job, ignoring: Unit snapd.failure.service not found.
+Apr 21 04:16:15 zen systemd[1]: Starting Snap Daemon...
+Apr 21 04:16:15 zen snapd[3344]: overlord.go:294: Acquiring state lock file
+Apr 21 04:16:15 zen snapd[3344]: overlord.go:299: Acquired state lock file
+Apr 21 04:16:15 zen snapd[3344]: daemon.go:276: started snapd/2.74.1-1 (series 16; classic; devmode) manjaro/ (amd64) linux/6.18.18-1-MANJARO.
+Apr 21 04:16:15 zen snapd[3344]: daemon.go:370: adjusting startup timeout by 30s (pessimistic estimate of 30s plus 5s per snap)
+Apr 21 04:16:15 zen snapd[3344]: backends.go:70: AppArmor status: apparmor is enabled but some kernel features are missing: network
+Apr 21 04:16:15 zen snapd[3344]: backend.go:145: reloading profiles for snap-confine
+Apr 21 04:16:16 zen snapd[3344]: standby.go:95: will consider standby after: 5s
+Apr 21 04:16:31 zen snapd[3344]: snapmgr.go:1659: performing periodic snap downloads cache cleanup
+Apr 21 04:16:31 zen snapd[3344]: cache.go:243: removed 0 entries/    0 from downloads cache
+Apr 21 04:16:51 zen snapd[3344]: standby.go:101: standby conditions met, initiating standby...
+Apr 21 04:16:51 zen snapd[3344]: daemon.go:556: gracefully waiting for running hooks
+Apr 21 04:16:51 zen snapd[3344]: daemon.go:558: done waiting for running hooks
+Apr 21 04:16:54 zen snapd[3344]: standby.go:121: standby monitoring stop requested
+Apr 21 04:16:54 zen snapd[3344]: overlord.go:543: Released state lock file
+Apr 21 04:16:54 zen snapd[3344]: daemon stop requested to wait for socket activation
+Apr 21 04:16:54 zen systemd[1]: snapd.service: Failed with result 'protocol'.
+Apr 21 04:16:54 zen systemd[1]: Failed to start Snap Daemon.
+Apr 21 04:16:54 zen systemd[1]: snapd.service: Triggering OnFailure= dependencies.
+Apr 21 04:16:54 zen systemd[1]: snapd.service: Failed to enqueue OnFailure=snapd.failure.service job, ignoring: Unit snapd.failure.service not found.
+
+Decision: snapd commonly fails under lockdown=integrity because snap
+confinement hot-loads AppArmor policies into the kernel's securityfs.
+If you don't use snap packages actively, safe to disable:
+  systemctl disable --now snapd snapd.socket snapd.apparmor 2>/dev/null
+
+[1m=== 5. USBGuard state + mouse rescue ===[0m
+● usbguard.service - USBGuard daemon
+     Loaded: loaded (/usr/lib/systemd/system/usbguard.service; enabled; preset: disabled)
+     Active: active (running) since Tue 2026-04-21 04:16:15 EDT; 10min ago
+ Invocation: db16dfbd9e9b4736ab9c7c311584f534
+       Docs: man:usbguard-daemon(8)
+    Process: 3356 ExecStart=/usr/bin/usbguard-daemon -f -s -c /etc/usbguard/usbguard-daemon.conf (code=exited, status=0/SUCCESS)
+   Main PID: 3443 (usbguard-daemon)
+      Tasks: 3 (limit: 18594)
+     Memory: 5M (peak: 5.6M)
+        CPU: 88ms
+     CGroup: /system.slice/usbguard.service
+             └─3443 /usr/bin/usbguard-daemon -f -s -c /etc/usbguard/usbguard-daemon.conf
+
+Apr 21 04:16:20 zen usbguard-daemon[3443]: Cannot resolve realpath for /sys/bus/usb/devices/../../../devices/pci0000:00/0000:00:14.0/usb1/1-3/1-3:1.2
+Apr 21 04:16:20 zen usbguard-daemon[3443]: Cannot resolve realpath for /sys/bus/usb/devices/../../../devices/pci0000:00/0000:00:14.0/usb1/1-5/1-5:1.0
+Apr 21 04:16:20 zen usbguard-daemon[3443]: Cannot resolve realpath for /sys/bus/usb/devices/../../../devices/pci0000:00/0000:00:14.0/usb1/1-5/1-5:1.1
+Apr 21 04:16:20 zen usbguard-daemon[3443]: Cannot resolve realpath for /sys/bus/usb/devices/../../../devices/pci0000:00/0000:00:14.0/usb1/1-5/1-5:1.2
+Apr 21 04:16:20 zen usbguard-daemon[3443]: Cannot resolve realpath for /sys/bus/usb/devices/../../../devices/pci0000:00/0000:00:14.0/usb1/1-5/1-5:1.3
+Apr 21 04:16:20 zen usbguard-daemon[3443]: Cannot resolve realpath for /sys/bus/usb/devices/../../../devices/pci0000:00/0000:00:14.0/usb2/2-3/2-3:1.0
+Apr 21 04:16:20 zen usbguard-daemon[3443]: Cannot resolve realpath for /sys/bus/usb/devices/../../../devices/pci0000:00/0000:00:14.0/usb1/1-10/1-10:1.0
+Apr 21 04:16:20 zen usbguard-daemon[3443]: Cannot resolve realpath for /sys/bus/usb/devices/../../../devices/pci0000:00/0000:00:14.0/usb1/1-10/1-10:1.1
+Apr 21 04:16:20 zen usbguard-daemon[3443]: Ignoring unknown UEvent action: sysfs_devpath=/devices/pci0000:00/0000:00:14.0/usb1/1-3 action=change
+Apr 21 04:16:20 zen usbguard-daemon[3443]: Ignoring unknown UEvent action: sysfs_devpath=/devices/pci0000:00/0000:00:14.0/usb1/1-10 action=change
+--- daemon config (relevant keys) ---
+IPCAllowedUsers=root will
+--- current device list ---
+1: allow id 1d6b:0002 serial "0000:00:14.0" name "xHCI Host Controller" hash "jEP/6WzviqdJ5VSeTUY8PatCNBKeaREvo2OqdplND/o=" parent-hash "rV9bfLq7c2eA4tYjVjwO4bxhm+y6GgZpl9J60L0fBkY=" via-port "usb1" with-interface 09:00:00 with-connect-type ""
+2: allow id 1d6b:0003 serial "0000:00:14.0" name "xHCI Host Controller" hash "prM+Jby/bFHCn2lNjQdAMbgc6tse3xVx+hZwjOPHSdQ=" parent-hash "rV9bfLq7c2eA4tYjVjwO4bxhm+y6GgZpl9J60L0fBkY=" via-port "usb2" with-interface 09:00:00 with-connect-type ""
+3: block id 046d:c52b serial "" name "USB Receiver" hash "EhX4Eu+u69SQBRB41ITnKdTEt2jQjpsTHNbRfU35+QM=" parent-hash "jEP/6WzviqdJ5VSeTUY8PatCNBKeaREvo2OqdplND/o=" via-port "1-3" with-interface { 03:01:01 03:01:02 03:00:00 } with-connect-type "hotplug"
+4: block id 13d3:56cb serial "200901010001" name "USB2.0 HD IR UVC WebCam" hash "fB+0bHgj3pjcvQyXo/0kAGJVzoaoDuM16964wWsRuXE=" parent-hash "jEP/6WzviqdJ5VSeTUY8PatCNBKeaREvo2OqdplND/o=" via-port "1-5" with-interface { 0e:01:01 0e:02:01 0e:02:01 0e:02:01 0e:02:01 0e:02:01 0e:02:01 0e:02:01 0e:02:01 0e:01:01 0e:02:01 0e:02:01 0e:02:01 0e:02:01 0e:02:01 0e:02:01 0e:02:01 0e:02:01 } with-connect-type "hardwired"
+5: block id 0781:5583 serial "0101824449185b1d4d7badf5f41d27caf5eafc35d6613eac10e4be8427f03accb56e000000000000000000002e5344dfff0c4d00835581073bb2fc5d" name " SanDisk 3.2Gen1" hash "o9RvkcvaNHddSEbGuHEO3M4zodoSWn3hE0HwmL/DSd8=" parent-hash "prM+Jby/bFHCn2lNjQdAMbgc6tse3xVx+hZwjOPHSdQ=" via-port "2-3" with-interface 08:06:50 with-connect-type "hotplug"
+6: block id 8087:0026 serial "" name "" hash "Z5csNGxiUukPPZwSHPyUqpVCNagsfOSSNL2CfXhw4IY=" parent-hash "jEP/6WzviqdJ5VSeTUY8PatCNBKeaREvo2OqdplND/o=" via-port "1-10" with-interface { e0:01:01 e0:01:01 e0:01:01 e0:01:01 e0:01:01 e0:01:01 e0:01:01 e0:01:01 } with-connect-type "not used"
+--- block/reject events this boot ---
+Apr 21 04:16:15 zen usbguard-daemon[3443]: uid=0 pid=3356 result='SUCCESS' device.system_name='/devices/pci0000:00/0000:00:14.0/usb1/1-3' target.new='block' device.rule='allow id 046d:c52b serial "" name "USB Receiver" hash "EhX4Eu+u69SQBRB41ITnKdTEt2jQjpsTHNbRfU35+QM=" parent-hash "jEP/6WzviqdJ5VSeTUY8PatCNBKeaREvo2OqdplND/o=" via-port "1-3" with-interface { 03:01:01 03:01:02 03:00:00 } with-connect-type "hotplug"' target.old='allow' type='Policy.Device.Update'
+Apr 21 04:16:15 zen usbguard-daemon[3443]: uid=0 pid=3356 result='SUCCESS' device.system_name='/devices/pci0000:00/0000:00:14.0/usb1/1-5' target.new='block' device.rule='allow id 13d3:56cb serial "200901010001" name "USB2.0 HD IR UVC WebCam" hash "fB+0bHgj3pjcvQyXo/0kAGJVzoaoDuM16964wWsRuXE=" parent-hash "jEP/6WzviqdJ5VSeTUY8PatCNBKeaREvo2OqdplND/o=" via-port "1-5" with-interface { 0e:01:01 0e:02:01 0e:02:01 0e:02:01 0e:02:01 0e:02:01 0e:02:01 0e:02:01 0e:02:01 0e:01:01 0e:02:01 0e:02:01 0e:02:01 0e:02:01 0e:02:01 0e:02:01 0e:02:01 0e:02:01 } with-connect-type "hardwired"' target.old='allow' type='Policy.Device.Update'
+Apr 21 04:16:15 zen usbguard-daemon[3443]: uid=0 pid=3356 result='SUCCESS' device.system_name='/devices/pci0000:00/0000:00:14.0/usb2/2-3' target.new='block' device.rule='allow id 0781:5583 serial "0101824449185b1d4d7badf5f41d27caf5eafc35d6613eac10e4be8427f03accb56e000000000000000000002e5344dfff0c4d00835581073bb2fc5d" name " SanDisk 3.2Gen1" hash "o9RvkcvaNHddSEbGuHEO3M4zodoSWn3hE0HwmL/DSd8=" parent-hash "prM+Jby/bFHCn2lNjQdAMbgc6tse3xVx+hZwjOPHSdQ=" via-port "2-3" with-interface 08:06:50 with-connect-type "hotplug"' target.old='allow' type='Policy.Device.Update'
+Apr 21 04:16:20 zen usbguard-daemon[3443]: uid=0 pid=3356 result='SUCCESS' device.system_name='/devices/pci0000:00/0000:00:14.0/usb1/1-10' target.new='block' device.rule='allow id 8087:0026 serial "" name "" hash "Z5csNGxiUukPPZwSHPyUqpVCNagsfOSSNL2CfXhw4IY=" parent-hash "jEP/6WzviqdJ5VSeTUY8PatCNBKeaREvo2OqdplND/o=" via-port "1-10" with-interface { e0:01:01 e0:01:01 e0:01:01 e0:01:01 e0:01:01 e0:01:01 e0:01:01 e0:01:01 } with-connect-type "not used"' target.old='allow' type='Policy.Device.Update'
+
+  [33m[fix][0m allowing blocked device id=3 permanently
+  [33m[fix][0m allowing blocked device id=4 permanently
+  [33m[fix][0m allowing blocked device id=5 permanently
+  [33m[fix][0m allowing blocked device id=6 permanently
+
+[1m=== 6. usbguard-lock-hook.service (user) ===[0m
+○ usbguard-lock-hook.service - USBGuard lock-aware InsertedDevicePolicy toggle
+     Loaded: loaded (/home/will/.config/systemd/user/usbguard-lock-hook.service; enabled; preset: enabled)
+     Active: inactive (dead)
+--- journal ---
+-- No entries --
+
+Decision: do NOT auto-fix. If the hook crashed on boot, note the
+traceback above. Most likely cause: dbus session not yet available
+at hook startup. Fix candidates (after we see the traceback):
+  - add 'After=dbus.socket graphical-session.target' to unit
+  - add a retry loop in the Python dbus code
+
+[1m=== 7. KDE coredumps this boot ===[0m
+TIME                         PID  UID  GID SIG     COREFILE EXE                                              SIZE
+Tue 2026-04-21 04:16:23 EDT 4012 1000 1000 SIGSEGV none     /usr/lib/cinnamon-settings-daemon/csd-media-keys    -
+Tue 2026-04-21 04:16:24 EDT 4170 1000 1000 SIGSEGV none     /usr/lib/cinnamon-settings-daemon/csd-media-keys    -
+Tue 2026-04-21 04:16:26 EDT 4015 1000 1000 SIGSEGV none     /usr/lib/cinnamon-settings-daemon/csd-power         -
+Tue 2026-04-21 04:16:28 EDT 4413 1000 1000 SIGSEGV none     /usr/lib/cinnamon-settings-daemon/csd-power         -
+Run 'coredumpctl info <PID>' or 'coredumpctl gdb <PID>' for details.
+
+[1m=== 8. Lockdown posture (expected: integrity) ===[0m
+lockdown: none [integrity] confidentiality
+sig_enforce: Y
+cmdline flags: lockdown=integrity module.sig_enforce=1 
+
+[1m=== POST-FIX FAILED UNITS ===[0m
+● audit-rules.service                                    loaded failed failed Load Audit Rules
+● drkonqi-coredump-processor@0-1-4148_4149-0.service     loaded failed failed Pass systemd-coredump journal entries to relevant user for potential DrKonqi handling
+● drkonqi-coredump-processor@1-4097-4208_4209-0.service  loaded failed failed Pass systemd-coredump journal entries to relevant user for potential DrKonqi handling
+● drkonqi-coredump-processor@2-16385-4332_4333-0.service loaded failed failed Pass systemd-coredump journal entries to relevant user for potential DrKonqi handling
+● drkonqi-coredump-processor@3-8194-4861_4862-0.service  loaded failed failed Pass systemd-coredump journal entries to relevant user for potential DrKonqi handling
+● snapd.service                                          loaded failed failed Snap Daemon
+● systemd-modules-load.service                           loaded failed failed Load Kernel Modules
+
+[report saved to /home/will/fix-report.txt]
+When you come back to Claude, I'll read /home/will/fix-report.txt to see what's left.

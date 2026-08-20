@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# /etc/kernel/postinst.d/zzz-uki-build  (zzz- prefix so run-parts runs this AFTER initramfs-tools and zz-systemd-boot)
+# Apt kernel postinst hook — builds and signs a UKI for the new kernel.
+# Invoked by: dpkg, with $1 = kernel version, $2 = vmlinuz path.
+set -euo pipefail
+
+KVER="${1:-}"
+KIMG="${2:-}"
+[[ -n "$KVER" && -f "$KIMG" ]] || exit 0
+
+INITRD="/boot/initrd.img-${KVER}"
+CMDLINE=/etc/kernel/cmdline
+
+# Locate UKI output dir — XBOOTLDR if FAT32, else ESP root.
+if findmnt /boot >/dev/null 2>&1 && [[ "$(findmnt -no FSTYPE /boot)" == "vfat" ]]; then
+    OUTDIR=/boot/EFI/Linux
+elif findmnt /efi >/dev/null 2>&1; then
+    OUTDIR=/efi/EFI/Linux
+elif findmnt /boot/efi >/dev/null 2>&1; then
+    OUTDIR=/boot/efi/EFI/Linux
+else
+    echo "90-uki-build: no ESP mount found — skipping" >&2
+    exit 0
+fi
+mkdir -p "$OUTDIR"
+
+[[ -f "$INITRD" ]] || { echo "90-uki-build: $INITRD missing — apt order?" >&2; exit 0; }
+[[ -s "$CMDLINE" ]] || { echo "90-uki-build: $CMDLINE missing/empty" >&2; exit 0; }
+
+UKI="$OUTDIR/linuxmint-${KVER}.efi"
+
+ukify build \
+    --linux "$KIMG" \
+    --initrd "$INITRD" \
+    --cmdline "@${CMDLINE}" \
+    --uname "$KVER" \
+    --output "$UKI"
+
+if command -v sbctl >/dev/null; then
+    sbctl sign -s "$UKI" || true
+fi
+
+echo "90-uki-build: UKI written → $UKI"

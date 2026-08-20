@@ -1,0 +1,23 @@
+# Sign nvidia modules whenever either the nvidia package OR any kernel package
+# is installed/upgraded. Target patterns cover both cases.
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = linux*-nvidia
+Target = nvidia
+Target = nvidia-dkms
+Target = nvidia-utils
+
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Path
+Target = usr/lib/modules/*/extramodules/nvidia*.ko*
+
+[Action]
+Description = Signing nvidia kernel modules...
+When = PostTransaction
+Exec = /usr/local/bin/sign-modules
+Depends = zstd
+NeedsTargets

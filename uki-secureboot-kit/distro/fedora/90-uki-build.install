@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# /etc/kernel/install.d/90-uki-build.install
+# kernel-install plugin — builds and signs a UKI for every installed kernel.
+# Invoked by: kernel-install add <kver> <kernel-image>  (run by dnf hooks)
+set -euo pipefail
+
+COMMAND="${1:-}"
+KVER="${2:-}"
+KIMG="${3:-}"
+
+[[ -n "$COMMAND" && -n "$KVER" && -n "$KIMG" ]] || exit 0
+
+# Where to drop the UKI: prefer XBOOTLDR if present, else ESP root.
+if findmnt /boot >/dev/null 2>&1 && [[ "$(findmnt -no FSTYPE /boot)" == "vfat" ]]; then
+    OUTDIR=/boot/EFI/Linux
+elif findmnt /efi >/dev/null 2>&1; then
+    OUTDIR=/efi/EFI/Linux
+elif findmnt /boot/efi >/dev/null 2>&1; then
+    OUTDIR=/boot/efi/EFI/Linux
+else
+    echo "90-uki-build: no ESP mounted — skipping UKI build" >&2
+    exit 0
+fi
+mkdir -p "$OUTDIR"
+
+UKI="$OUTDIR/fedora-${KVER}.efi"
+INITRD="/boot/initramfs-${KVER}.img"
+CMDLINE=/etc/kernel/cmdline
+
+case "$COMMAND" in
+    add)
+        [[ -f "$INITRD" ]] || exit 0   # dracut hook (90-dracut-install) runs before us
+        [[ -s "$CMDLINE" ]] || { echo "90-uki-build: $CMDLINE missing" >&2; exit 0; }
+        ukify build \
+            --linux "$KIMG" \
+            --initrd "$INITRD" \
+            --cmdline "@${CMDLINE}" \
+            --uname "$KVER" \
+            --output "$UKI"
+        if command -v sbctl >/dev/null; then
+            sbctl sign -s "$UKI" || true
+        fi
+        ;;
+    remove)
+        if [[ -f "$UKI" ]]; then
+            if command -v sbctl >/dev/null; then
+                sbctl remove-file "$UKI" >/dev/null 2>&1 || true
+            fi
+            rm -f "$UKI"
+        fi
+        ;;
+esac

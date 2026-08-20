@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Check upstream Manjaro kernel PKGBUILDs for new pkgver/pkgrel vs our installed signed builds.
+# Auto-discovers kernels: any installed package matching ^linuxNN$ is checked.
+# Exits 0 if up to date, 10 if rebuilds needed, 1 on error.
+# Meant to be run by a systemd timer + notify-send the user if drift detected.
+
+set -u
+
+RESULT_FILE=/var/lib/signed-kernels/check-status
+mkdir -p /var/lib/signed-kernels 2>/dev/null
+
+# auto-discover Manjaro versioned kernels (linux66, linux612, linux618, ...)
+mapfile -t KERNELS < <(pacman -Qq 2>/dev/null | grep -E '^linux[0-9]+$' | sort)
+
+if (( ${#KERNELS[@]} == 0 )); then
+    echo "no Manjaro versioned kernels installed — nothing to check"
+    echo "no-kernels at $(date -Iseconds)" > "$RESULT_FILE"
+    exit 0
+fi
+
+echo "discovered kernels: ${KERNELS[*]}"
+echo
+
+need=()
+for K in "${KERNELS[@]}"; do
+    installed=$(pacman -Q "$K" 2>/dev/null | awk '{print $2}')
+    [[ -z $installed ]] && continue
+
+    upstream_pkgbuild=$(curl -fsSL "https://gitlab.manjaro.org/packages/core/$K/-/raw/main/PKGBUILD" 2>/dev/null \
+                     || curl -fsSL "https://gitlab.manjaro.org/packages/core/$K/-/raw/master/PKGBUILD" 2>/dev/null)
+    [[ -z $upstream_pkgbuild ]] && { echo "[$K] could not fetch upstream PKGBUILD"; continue; }
+
+    upstream_ver=$(echo "$upstream_pkgbuild" | awk -F= '/^pkgver=/{print $2; exit}')
+    upstream_rel=$(echo "$upstream_pkgbuild" | awk -F= '/^pkgrel=/{print $2; exit}')
+    upstream="${upstream_ver}-${upstream_rel}"
+
+    if [[ "$installed" == "$upstream" ]]; then
+        echo "[$K] installed=$installed upstream=$upstream — UP TO DATE"
+    else
+        echo "[$K] installed=$installed upstream=$upstream — REBUILD NEEDED"
+        need+=("$K")
+    fi
+done
+
+echo
+if (( ${#need[@]} == 0 )); then
+    echo "all signed kernels up to date"
+    echo "up-to-date at $(date -Iseconds)" > "$RESULT_FILE"
+    exit 0
+else
+    printf 'rebuild needed for: %s\n' "${need[*]}"
+    printf 'rebuild-needed %s at %s\n' "${need[*]}" "$(date -Iseconds)" > "$RESULT_FILE"
+
+    # notify user if running under a graphical session
+    if command -v notify-send >/dev/null && [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+        notify-send -u normal \
+            "Signed kernel rebuild needed" \
+            "Upstream: ${need[*]}\nRun: sudo /usr/local/bin/signed-kernels-rebuild-all"
+    fi
+    exit 10
+fi

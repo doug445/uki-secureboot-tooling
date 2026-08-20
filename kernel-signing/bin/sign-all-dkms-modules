@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Sign every DKMS-produced .ko in every installed kernel's extramodules dir
+# using the Will Module Signing Key. Safe to re-run; signing an already-
+# signed module with the same key is a no-op that overwrites identically.
+set -u
+
+KEY=/var/lib/dkms/mok.key
+CERT=/var/lib/dkms/mok.pub
+# Fallback cert locations, first match wins
+for cand in /var/lib/dkms/mok.{key,pub} /root/module-signing/{key.pem,cert.der,cert.x509}; do
+    [[ -f $cand ]] && echo "  key/cert candidate: $cand"
+done
+if [[ ! -r $KEY || ! -r $CERT ]]; then
+    echo "sign-all-dkms-modules: missing $KEY or $CERT — nothing to do" >&2
+    exit 0   # don't fail the pacman transaction
+fi
+
+signed=0; failed=0; skipped=0
+# Walk both extramodules/ (nvidia-style) and updates/dkms/ (zfs-style).
+# DKMS framework.conf already auto-signs updates/dkms/ at build time; this
+# is a safety net in case framework.conf ever loses the key.
+for kver_dir in /usr/lib/modules/*/extramodules /usr/lib/modules/*/updates/dkms; do
+    [[ -d $kver_dir ]] || continue
+    case "$kver_dir" in
+        */extramodules)  kver=$(basename "${kver_dir%/extramodules}") ;;
+        */updates/dkms)  kver=$(basename "${kver_dir%/updates/dkms}") ;;
+    esac
+    KERN_SRC=/usr/lib/modules/$kver/build
+    SIGN_BIN=$KERN_SRC/scripts/sign-file
+    if [[ ! -x $SIGN_BIN ]]; then
+        echo "  [skip] $kver — no sign-file at $SIGN_BIN"
+        skipped=$((skipped+1))
+        continue
+    fi
+    # Decompress .ko.zst / .ko.gz / .ko.xz in-place-safe, sign, recompress
+    while IFS= read -r -d '' mod; do
+        tmp=
+        case "$mod" in
+            *.ko)     sig_target="$mod" ;;
+            *.ko.zst) tmp="${mod%.zst}"; zstd -d -q --rm -o "$tmp" "$mod" || { failed=$((failed+1)); continue; }; sig_target="$tmp"; mod_compress=zst ;;
+            *.ko.gz)  tmp="${mod%.gz}";  gunzip -k -c "$mod" > "$tmp"; rm -f "$mod"; sig_target="$tmp"; mod_compress=gz ;;
+            *.ko.xz)  tmp="${mod%.xz}";  xz -d -k -c "$mod" > "$tmp"; rm -f "$mod"; sig_target="$tmp"; mod_compress=xz ;;
+            *) continue ;;
+        esac
+        if "$SIGN_BIN" sha512 "$KEY" "$CERT" "$sig_target" 2>/dev/null; then
+            signed=$((signed+1))
+            case "${mod_compress:-}" in
+                zst) zstd -q --rm -o "${sig_target}.zst" "$sig_target" ;;
+                gz)  gzip "$sig_target" ;;
+                xz)  xz   "$sig_target" ;;
+            esac
+        else
+            failed=$((failed+1))
+        fi
+    done < <(find "$kver_dir" -type f \( -name '*.ko' -o -name '*.ko.zst' -o -name '*.ko.gz' -o -name '*.ko.xz' \) -print0)
+done
+echo "sign-all-dkms-modules: signed=$signed failed=$failed skipped=$skipped"
+# Re-run depmod so new signatures are indexed
+for k in /usr/lib/modules/*/; do
+    { [[ -d ${k}extramodules ]] || [[ -d ${k}updates/dkms ]]; } && depmod -a "$(basename "$k")" 2>/dev/null
+done
+exit 0

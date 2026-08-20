@@ -1,0 +1,18 @@
+# mkinitcpio preset template — Arch family (Manjaro, Arch, EndeavourOS, ...)
+# Phase 40 will copy this on top of /etc/mkinitcpio.d/<pkg>.preset and substitute
+# {{KVER}}, {{KIT_DISTRO_ID}}, {{UKI_OUTDIR}}, {{CMDLINE_PATH}} placeholders.
+#
+# Both default_image= and default_uki= are intentionally present:
+#   - default_image= produces the standalone initramfs that the BLS fallback
+#     entry from phase 35 loads when a UKI is broken
+#   - default_uki=  produces the signed unified image that systemd-boot
+#     prefers as the primary boot path
+
+ALL_config="/etc/mkinitcpio.conf"
+ALL_kver="/boot/vmlinuz-{{KVER}}"
+
+PRESETS=('default')
+
+default_image="/boot/initramfs-{{KVER}}.img"
+default_uki="{{UKI_OUTDIR}}/{{KIT_DISTRO_ID}}-{{KVER}}.efi"
+default_options="--cmdline {{CMDLINE_PATH}}"

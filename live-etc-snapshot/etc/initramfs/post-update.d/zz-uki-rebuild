@@ -1,0 +1,61 @@
+#!/bin/sh
+# /etc/initramfs/post-update.d/zz-uki-rebuild
+#
+# Guard hook that keeps the signed UKI in sync with the initrd.
+#
+# WHY THIS EXISTS
+#   The UKI builder (/etc/kernel/postinst.d/zzz-uki-build) only runs on a
+#   *kernel-package* postinst. When only the GPU driver is upgraded (e.g.
+#   nvidia-dkms-595.postinst runs `update-initramfs -u`), DKMS rebuilds the .ko
+#   in /lib/modules and regenerates the initrd, but nothing re-signs the UKI for
+#   an already-installed kernel. The UKI then carries a stale driver, while
+#   userspace moves on -> `NVRM: API mismatch` -> Xorg/GDM dies -> TTY, no GUI.
+#
+#   update-initramfs runs the scripts in /etc/initramfs/post-update.d/ every time
+#   an initrd is (re)generated, so this is the correct place to rebuild the UKI.
+#
+# INVOCATION (by update-initramfs):  $1 = kernel version, $2 = new initrd path.
+#
+# SAFETY: best-effort only. It must never abort the triggering package's
+# maintainer script, so every failure is swallowed and we always exit 0.
+
+set -u
+
+KVER="${1:-}"
+[ -n "$KVER" ] || exit 0
+
+# On a kernel-package (un)install, /etc/kernel/postinst.d/zzz-uki-build already
+# builds and signs the UKI as the last postinst.d step. Skip here to avoid a
+# redundant double build and to avoid deleting the loose vmlinuz out from under
+# later postinst.d scripts in the same run.
+case "${DPKG_MAINTSCRIPT_PACKAGE:-}" in
+    linux-image-*|linux-image|kfreebsd-image-*) exit 0 ;;
+esac
+
+BUILDER=/etc/kernel/postinst.d/zzz-uki-build
+[ -x "$BUILDER" ] || exit 0
+
+# UKI-only boot deletes the loose vmlinuz after each build, but the builder needs
+# it as $2. Prefer a loose copy if one is present; otherwise restore it from the
+# encrypted kernel-store archive that zzz-uki-build maintains on LUKS /root.
+KIMG="/boot/vmlinuz-${KVER}"
+if [ ! -f "$KIMG" ]; then
+    ARCHIVED="/root/kernel-store/${KVER}/vmlinuz"
+    if [ -f "$ARCHIVED" ]; then
+        cp -f "$ARCHIVED" "$KIMG" || exit 0
+    else
+        echo "zz-uki-rebuild: no vmlinuz for $KVER (neither loose nor archived) -- skipping UKI refresh" >&2
+        exit 0
+    fi
+fi
+
+# zzz-uki-build reads /boot/initrd.img-$KVER (the one update-initramfs just
+# wrote) and /etc/kernel/cmdline, builds an unsigned UKI in tmpfs, sbctl-signs it
+# straight onto the ESP, re-archives vmlinuz+initrd, then removes the loose files.
+# It does NOT call update-initramfs, so there is no recursion back into us.
+echo "zz-uki-rebuild: refreshing signed UKI for $KVER after initrd regeneration"
+if ! "$BUILDER" "$KVER" "$KIMG"; then
+    echo "zz-uki-rebuild: UKI refresh for $KVER failed (non-fatal); UKI may be stale" >&2
+fi
+
+exit 0

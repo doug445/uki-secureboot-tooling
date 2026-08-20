@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Rebuild and install every signed kernel whose upstream has drifted.
+# Auto-discovers kernels: any installed package matching ^linuxNN$.
+# Runs signed-kernel-build per kernel. zfs DKMS + nvidia extramodules re-sign
+# automatically via existing pacman hooks (80-sign-nvidia, 81-sign-all-dkms).
+# Post-transaction: mkinitcpio -P + sbctl sign auto-fire via their pacman hooks.
+#
+# Usage: sudo signed-kernels-rebuild-all [--force] [--only linuxNN[,linuxMM]]
+#   --force:       rebuild even if check says up to date
+#   --only K1,K2:  restrict to these kernels (must be installed)
+
+set -u
+
+FORCE=0
+ONLY=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --force) FORCE=1; shift ;;
+        --only)  ONLY="$2"; shift 2 ;;
+        *) echo "unknown arg: $1" >&2; exit 2 ;;
+    esac
+done
+
+if [[ $EUID -ne 0 ]]; then
+    echo "run as root (needed for pacman -U)" >&2; exit 1
+fi
+
+# discover installed Manjaro versioned kernels
+mapfile -t ALL < <(pacman -Qq 2>/dev/null | grep -E '^linux[0-9]+$' | sort)
+
+# filter by --only if given
+if [[ -n "$ONLY" ]]; then
+    IFS=',' read -ra REQUESTED <<< "$ONLY"
+    CANDIDATES=()
+    for K in "${REQUESTED[@]}"; do
+        if printf '%s\n' "${ALL[@]}" | grep -qxF "$K"; then
+            CANDIDATES+=("$K")
+        else
+            echo "skipping $K — not installed" >&2
+        fi
+    done
+else
+    CANDIDATES=("${ALL[@]}")
+fi
+
+if (( ${#CANDIDATES[@]} == 0 )); then
+    echo "no kernels to consider"
+    exit 0
+fi
+
+echo "candidate kernels: ${CANDIDATES[*]}"
+
+# snapshot before
+if command -v snapper >/dev/null; then
+    snap_num=$(snapper -c root create --description "pre-signed-kernel-rebuild-$(date +%s)" --cleanup-algorithm=number --print-number 2>/dev/null || echo "")
+    [[ -n $snap_num ]] && echo "snapper pre-snapshot: #$snap_num"
+fi
+
+# determine what to rebuild
+need=()
+if (( FORCE )); then
+    need=("${CANDIDATES[@]}")
+    echo "--force: rebuilding all candidates"
+else
+    for K in "${CANDIDATES[@]}"; do
+        inst=$(pacman -Q "$K" 2>/dev/null | awk '{print $2}')
+        [[ -z $inst ]] && continue
+        up_pkg=$(curl -fsSL "https://gitlab.manjaro.org/packages/core/$K/-/raw/main/PKGBUILD" 2>/dev/null \
+              || curl -fsSL "https://gitlab.manjaro.org/packages/core/$K/-/raw/master/PKGBUILD" 2>/dev/null)
+        [[ -z $up_pkg ]] && { echo "[$K] skipped — couldn't fetch upstream"; continue; }
+        up_ver=$(echo "$up_pkg" | awk -F= '/^pkgver=/{print $2; exit}')
+        up_rel=$(echo "$up_pkg" | awk -F= '/^pkgrel=/{print $2; exit}')
+        up="${up_ver}-${up_rel}"
+        [[ "$inst" != "$up" ]] && need+=("$K")
+    done
+fi
+
+if (( ${#need[@]} == 0 )); then
+    echo "nothing to rebuild (use --force to override)"
+    exit 0
+fi
+
+echo "=== rebuilding: ${need[*]} ==="
+
+# Build each as user 'will' (makepkg won't run as root)
+failures=()
+for K in "${need[@]}"; do
+    echo
+    echo "=== $K: BUILD ==="
+    if su - will -c "/usr/local/bin/signed-kernel-build $K"; then
+        echo "=== $K: INSTALL ==="
+        cd /home/will/kernel-rebuild/$K
+        pacman -U --noconfirm --overwrite='*' ./*.pkg.tar.zst || failures+=("$K:install")
+    else
+        failures+=("$K:build")
+    fi
+done
+
+if (( ${#failures[@]} )); then
+    echo
+    echo "FAILURES: ${failures[*]}"
+    exit 1
+fi
+
+echo
+echo "=== all rebuilds installed ==="
+echo "=== UKIs, DKMS rebuilds, and module signing handled by existing pacman hooks ==="
+echo "=== reboot to pick up new signed kernels ==="

@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# /etc/kernel/postinst.d/zzz-uki-build  (zzz- prefix so run-parts runs this AFTER initramfs-tools and zz-systemd-boot)
+# Apt kernel postinst hook — builds and signs a UKI for the new kernel.
+# Invoked by: dpkg, with $1 = kernel version, $2 = vmlinuz path.
+# Staging: unsigned UKI is built in /tmp (tmpfs); sbctl writes the signed result
+# directly to the ESP via `sbctl sign -o`, so /boot only ever holds completed,
+# signed UKIs (no half-written intermediates on the FAT32 ESP).
+set -euo pipefail
+
+# dpkg postinst hands us a minimal PATH (/usr/sbin:/usr/bin:/sbin:/bin) — add
+# /usr/local/{s,}bin so locally-installed sbctl is found.
+export PATH="/usr/local/sbin:/usr/local/bin:${PATH:-/usr/sbin:/usr/bin:/sbin:/bin}"
+
+KVER="${1:-}"
+KIMG="${2:-}"
+[[ -n "$KVER" && -f "$KIMG" ]] || exit 0
+
+INITRD="/boot/initrd.img-${KVER}"
+CMDLINE=/etc/kernel/cmdline
+
+# Locate UKI output dir — XBOOTLDR if FAT32, else ESP root.
+if findmnt /boot >/dev/null 2>&1 && [[ "$(findmnt -no FSTYPE /boot)" == "vfat" ]]; then
+    OUTDIR=/boot/EFI/Linux
+elif findmnt /efi >/dev/null 2>&1; then
+    OUTDIR=/efi/EFI/Linux
+elif findmnt /boot/efi >/dev/null 2>&1; then
+    OUTDIR=/boot/efi/EFI/Linux
+else
+    echo "90-uki-build: no ESP mount found — skipping" >&2
+    exit 0
+fi
+mkdir -p "$OUTDIR"
+
+[[ -f "$INITRD" ]] || { echo "90-uki-build: $INITRD missing — apt order?" >&2; exit 0; }
+[[ -s "$CMDLINE" ]] || { echo "90-uki-build: $CMDLINE missing/empty" >&2; exit 0; }
+
+UKI="$OUTDIR/linuxmint-${KVER}.efi"
+
+# Build unsigned UKI off-ESP so a mid-write failure can't leave a partial on /boot.
+TMP_UKI=$(mktemp --tmpdir "uki-linuxmint-${KVER}.XXXXXX.efi")
+trap '/bin/rm -f "$TMP_UKI"' EXIT
+
+ukify build \
+    --linux "$KIMG" \
+    --initrd "$INITRD" \
+    --cmdline "@${CMDLINE}" \
+    --uname "$KVER" \
+    --output "$TMP_UKI"
+
+if ! command -v sbctl >/dev/null; then
+    echo "90-uki-build: sbctl not installed — refusing to copy unsigned UKI to /boot" >&2
+    exit 1
+fi
+# Two-pass: first sign writes the signed PE directly to /boot; second `-s` re-signs in
+# place so the *final* path lands in sbctl's db (otherwise -s would save the /tmp input).
+sbctl sign -o "$UKI" "$TMP_UKI"
+sbctl sign -s "$UKI" >/dev/null
+
+echo "90-uki-build: signed UKI written → $UKI"
+
+# Archive the loose kernel image + initrd to encrypted /root (LUKS) BEFORE deleting
+# them below. vmlinuz is not regenerable (comes only from the kernel package); keeping
+# the matching initrd lets a UKI be rebuilt later without reinstalling the kernel.
+# Best-effort: a subshell with set +e so an archive failure never aborts the UKI hook.
+# Pruned each run to only kernels still present in /lib/modules.
+(
+    set +e
+    ARCHIVE_DIR=/root/kernel-store
+    mkdir -p "$ARCHIVE_DIR/$KVER"
+    cp -f "$KIMG"    "$ARCHIVE_DIR/$KVER/vmlinuz"
+    cp -f "$INITRD"  "$ARCHIVE_DIR/$KVER/initrd.img"
+    cp -f "$CMDLINE" "$ARCHIVE_DIR/$KVER/cmdline"
+    chmod 700 "$ARCHIVE_DIR"
+    chmod -R go-rwx "$ARCHIVE_DIR/$KVER"
+    for d in "$ARCHIVE_DIR"/*/; do
+        kv=$(basename "$d")
+        [ -d "/lib/modules/$kv" ] || rm -rf "$d"
+    done
+    echo "90-uki-build: archived vmlinuz+initrd → $ARCHIVE_DIR/$KVER"
+) || true
+
+# UKI-only boot: loose vmlinuz/initrd/System.map/config now baked into the UKI.
+# Regenerated on next kernel update, so deleting keeps /boot lean.
+/bin/rm -f "$KIMG" "$INITRD" "/boot/System.map-${KVER}" "/boot/config-${KVER}" || true

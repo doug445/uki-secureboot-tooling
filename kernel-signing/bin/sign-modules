@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Sign unsigned kernel extramodules (nvidia, etc.) with our MOK key.
+# Called by pacman hook after nvidia package updates, or manually.
+#
+# Usage: sign-modules.sh [kernel-version]
+#   kernel-version defaults to $(uname -r)
+
+set -euo pipefail
+
+MOK_KEY="/var/lib/module-signing/mok.key"
+MOK_CERT="/var/lib/module-signing/mok.pem"
+HASH="sha512"
+
+KVER="${1:-$(uname -r)}"
+SIGN_FILE="/usr/lib/modules/${KVER}/build/scripts/sign-file"
+EXTRAMOD_DIR="/usr/lib/modules/${KVER}/extramodules"
+
+if [[ ! -f "$SIGN_FILE" ]]; then
+    echo "ERROR: sign-file not found for kernel ${KVER}" >&2
+    exit 1
+fi
+
+if [[ ! -d "$EXTRAMOD_DIR" ]]; then
+    echo "ERROR: extramodules dir not found: ${EXTRAMOD_DIR}" >&2
+    exit 1
+fi
+
+signed=0
+skipped=0
+
+for mod_zst in "${EXTRAMOD_DIR}"/*.ko.zst; do
+    [[ -f "$mod_zst" ]] || continue
+    mod_name="$(basename "$mod_zst")"
+    mod_ko="${mod_zst%.zst}"
+
+    echo -n "  ${mod_name}: "
+
+    # Decompress
+    zstd -d -f -q "$mod_zst" -o "$mod_ko"
+
+    # Check if already signed with our key
+    if modinfo "$mod_ko" 2>/dev/null | grep -q "Will Module Signing Key"; then
+        echo "already signed, skipping"
+        rm -f "$mod_ko"
+        skipped=$((skipped + 1))
+        continue
+    fi
+
+    # Sign
+    "$SIGN_FILE" "$HASH" "$MOK_KEY" "$MOK_CERT" "$mod_ko"
+
+    # Recompress (replace original)
+    zstd -f -q --rm "$mod_ko" -o "$mod_zst"
+
+    echo "signed"
+    signed=$((signed + 1))
+done
+
+echo "Done: ${signed} signed, ${skipped} skipped"

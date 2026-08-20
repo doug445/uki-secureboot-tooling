@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# /usr/local/sbin/sign-systemd-boot
+# Re-sign the systemd-boot EFI binary with sbctl after `bootctl update` rewrites it.
+# bootctl update runs on a systemd / systemd-boot *package* upgrade — a non-kernel
+# event — so the kernel UKI hooks never see it, and the freshly-installed binary
+# lands unsigned. Wired in via apt's DPkg::Post-Invoke (/etc/apt/apt.conf.d/99-sign-systemd-boot),
+# mirroring the keep-n-kernels hook. Idempotent: only re-signs when the binary is
+# not already validly signed, so it doesn't churn the ESP on every apt run.
+set -euo pipefail
+
+# apt/dpkg hand us a minimal PATH — add /usr/local/{s,}bin so a locally-built sbctl resolves.
+export PATH="/usr/local/sbin:/usr/local/bin:${PATH:-/usr/sbin:/usr/bin:/sbin:/bin}"
+
+command -v sbctl >/dev/null || exit 0
+
+# The bootloader binary lives on the ESP (not XBOOTLDR). Probe the usual mounts.
+BL=""
+for esp in /efi /boot/efi /boot; do
+    if [[ -f "$esp/EFI/systemd/systemd-bootx64.efi" ]]; then
+        BL="$esp/EFI/systemd/systemd-bootx64.efi"
+        break
+    fi
+done
+[[ -n "$BL" ]] || exit 0
+
+# Already validly signed → nothing to do.
+sbctl verify "$BL" >/dev/null 2>&1 && exit 0
+
+if sbctl sign "$BL" >/dev/null 2>&1; then
+    echo "sign-systemd-boot: re-signed $BL"
+else
+    echo "sign-systemd-boot: WARNING — failed to sign $BL" >&2
+fi

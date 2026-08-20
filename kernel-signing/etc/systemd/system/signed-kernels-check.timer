@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly check: upstream Manjaro kernels vs local signed builds
+
+[Timer]
+OnCalendar=Sun 05:00
+Persistent=true
+RandomizedDelaySec=30m
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,27 @@
+# Sign every DKMS-built module after any kernel change. Catches zfs, nvidia,
+# v4l2loopback, anything else. Idempotent — resigning already-signed modules
+# is harmless.
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Path
+Target = usr/lib/modules/*/extramodules/*.ko*
+Target = usr/lib/modules/*/updates/dkms/*.ko*
+
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = linux*
+Target = linux-lts
+Target = linux-zen
+Target = linux-hardened
+Target = linux-mainline
+
+[Action]
+Description = Signing all DKMS kernel modules (broad net)...
+When = PostTransaction
+Exec = /usr/local/bin/sign-all-dkms-modules
+Depends = zstd
+Depends = openssl
+NeedsTargets

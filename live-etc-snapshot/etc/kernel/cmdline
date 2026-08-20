@@ -1,0 +1,1 @@
+root=/dev/mapper/vgmint-root ro quiet splash printk.devkmsg=on

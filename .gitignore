@@ -1,0 +1,38 @@
+# --- Secret / key material: never commit ---
+*.key
+*.priv
+*.p12
+*.pfx
+*.pem.key
+db.key
+MOK.priv
+MOK.key
+*.gpg
+
+# --- LUKS header dumps (contain encrypted master-key material) ---
+*.bin
+luks-header-*
+*luksHeader*
+
+# --- Captured real-host state (machine-id, boot config, UUIDs) ---
+backups/
+**/backups/
+*.machine-id
+
+# --- Operational run logs ---
+logs/
+*.log
+
+# --- Offline install payloads (bloat) ---
+offline/debs/
+offline/sbctl/
+*.tar.gz
+*.deb
+
+# --- Filesystem junk (exFAT / macOS / Windows volumes) ---
+.Spotlight-V100/
+.fseventsd/
+System Volume Information/
+FOUND.*
+lost+found/
+.DS_Store

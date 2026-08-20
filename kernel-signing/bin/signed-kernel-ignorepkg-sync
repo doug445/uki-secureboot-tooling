@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Read pacman hook targets from stdin (one package per line), update
+# /etc/pacman.conf IgnorePkg to include every currently-installed linuxNN +
+# linuxNN-headers, notify user to rebuild.
+set -u
+
+# collect every installed Manjaro versioned kernel + its headers
+mapfile -t kernels < <(pacman -Qq | grep -E '^linux[0-9]+$' | sort)
+pkgs=()
+for k in "${kernels[@]}"; do
+    pkgs+=("$k" "$k-headers")
+done
+new_line="IgnorePkg = ${pkgs[*]}"
+
+CONF=/etc/pacman.conf
+# temporarily flip immutable if set (pacman.conf itself isn't +i, but safe)
+was_i=0
+lsattr "$CONF" 2>/dev/null | grep -q -- '-i-' && { chattr -i "$CONF"; was_i=1; }
+
+if grep -qE '^IgnorePkg\b' "$CONF"; then
+    # replace existing line
+    sed -i "s|^IgnorePkg\b.*|$new_line|" "$CONF"
+else
+    # insert after commented stub or before first section header
+    sed -i "0,/^#IgnorePkg/s||$new_line\n#IgnorePkg|" "$CONF" \
+      || sed -i "0,/^\[/s||$new_line\n\n[|" "$CONF"
+fi
+
+(( was_i )) && chattr +i "$CONF"
+
+echo "[signed-kernel-ignorepkg-sync] updated: $new_line"
+
+# notify user to rebuild (service runs as root; shell out to will session)
+if [[ -S /run/user/1000/bus ]]; then
+    runuser -u will -- env \
+        DISPLAY=:0 \
+        DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+        notify-send -u normal "New kernel installed — signed rebuild needed" \
+            "Run: sudo signed-kernels-rebuild-all --force --only <new-kernel>" 2>/dev/null || true
+fi

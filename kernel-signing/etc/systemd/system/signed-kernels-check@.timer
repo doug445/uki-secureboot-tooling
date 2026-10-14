@@ -1,5 +1,5 @@
 [Unit]
-Description=Weekly check: upstream Manjaro kernels vs local signed builds
+Description=Weekly check: upstream Manjaro kernels vs local signed builds (for %I)
 
 [Timer]
 OnCalendar=Sun 05:00

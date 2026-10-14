@@ -8,6 +8,7 @@
 # Usage: sudo signed-kernels-rebuild-all [--force] [--only linuxNN[,linuxMM]]
 #   --force:       rebuild even if check says up to date
 #   --only K1,K2:  restrict to these kernels (must be installed)
+# Builds as the user who ran sudo (or doas); KERNEL_BUILD_USER=name overrides.
 
 set -u
 
@@ -25,10 +26,14 @@ if [[ $EUID -ne 0 ]]; then
     echo "run as root (needed for pacman -U)" >&2; exit 1
 fi
 
-# makepkg won't run as root, so every kernel is built as this user.
-BUILD_USER=will
+# makepkg won't run as root, so every kernel is built as an unprivileged user:
+# $KERNEL_BUILD_USER if set, else the user who invoked sudo (or doas).
+BUILD_USER="${KERNEL_BUILD_USER:-${SUDO_USER:-${DOAS_USER:-}}}"
+[[ -n $BUILD_USER ]] || { echo "can't tell which user to build as: run this with sudo from that account, or set KERNEL_BUILD_USER" >&2; exit 1; }
+BUILD_UID=$(id -u "$BUILD_USER" 2>/dev/null) || { echo "build user '$BUILD_USER' not found" >&2; exit 1; }
+(( BUILD_UID != 0 )) || { echo "build user '$BUILD_USER' is root and makepkg refuses root: set KERNEL_BUILD_USER" >&2; exit 1; }
 BUILD_HOME=$(getent passwd "$BUILD_USER" | cut -d: -f6)
-[[ -n $BUILD_HOME ]] || { echo "build user '$BUILD_USER' not found — edit BUILD_USER" >&2; exit 1; }
+[[ -n $BUILD_HOME ]] || { echo "build user '$BUILD_USER' has no home directory" >&2; exit 1; }
 # Build tree shared with signed-kernel-build, resolved once here and passed
 # to it explicitly so the install below reads the tree that was just built.
 KERNEL_REBUILD_DIR="${KERNEL_REBUILD_DIR:-$BUILD_HOME/kernel-rebuild}"

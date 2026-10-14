@@ -1,0 +1,15 @@
+[Unit]
+Description=Check upstream Manjaro kernels against locally-built signed kernels (for %I)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/signed-kernels-check
+# The instance is the desktop user to run as and notify, e.g.
+# signed-kernels-check@will.service. The script derives XDG_RUNTIME_DIR from
+# its own UID: in a system unit %U is the manager's UID (0), not User='s.
+User=%I
+Environment=DISPLAY=:0
+StateDirectory=signed-kernels
+SuccessExitStatus=0 10

@@ -30,11 +30,19 @@ fi
 
 echo "[signed-kernel-ignorepkg-sync] updated: $new_line"
 
-# notify user to rebuild (service runs as root; shell out to will session)
-if [[ -S /run/user/1000/bus ]]; then
-    runuser -u will -- env \
+# Notify each logged-in desktop user to rebuild. This runs as root with no
+# session of its own, so find every session bus under /run/user that belongs
+# to a regular user (UID_MIN and up) and notify through it.
+uid_min=$(awk '/^UID_MIN/ {print $2}' /etc/login.defs 2>/dev/null)
+uid_min=${uid_min:-1000}
+for bus in /run/user/*/bus; do
+    [[ -S $bus ]] || continue
+    uid=${bus#/run/user/}; uid=${uid%/bus}
+    [[ $uid =~ ^[0-9]+$ ]] && (( uid >= uid_min )) || continue
+    user=$(id -nu "$uid" 2>/dev/null) || continue
+    runuser -u "$user" -- env \
         DISPLAY=:0 \
-        DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=$bus" \
         notify-send -u normal "New kernel installed — signed rebuild needed" \
             "Run: sudo signed-kernels-rebuild-all --force --only <new-kernel>" 2>/dev/null || true
-fi
+done

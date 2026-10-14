@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
 # /etc/kernel/install.d/90-uki-build.install
 # kernel-install plugin — builds and signs a UKI for every installed kernel.
-# Invoked by: kernel-install add <kver> <kernel-image>  (run by dnf hooks)
+# kernel-install(8) (run by dnf) calls plugins as
+#   add KVER ENTRY-DIR KERNEL-IMAGE [INITRD...]    remove KVER ENTRY-DIR
+# ENTRY-DIR ($BOOT/ENTRY-TOKEN/KVER/) is a directory, unused here and possibly
+# absent. By hand (README smoke test): add KVER KERNEL-IMAGE  /  remove KVER
 set -euo pipefail
 
 COMMAND="${1:-}"
 KVER="${2:-}"
-KIMG="${3:-}"
+# A regular file in $3 means the by-hand form; otherwise $3 is ENTRY-DIR.
+if [[ -f "${3:-}" ]]; then
+    KIMG="$3"
+else
+    KIMG="${4:-}"
+fi
 
-[[ -n "$COMMAND" && -n "$KVER" && -n "$KIMG" ]] || exit 0
+[[ -n "$COMMAND" && -n "$KVER" ]] || exit 0
 
 # Where to drop the UKI: prefer XBOOTLDR if present, else ESP root.
 if findmnt /boot >/dev/null 2>&1 && [[ "$(findmnt -no FSTYPE /boot)" == "vfat" ]]; then
@@ -29,6 +37,7 @@ CMDLINE=/etc/kernel/cmdline
 
 case "$COMMAND" in
     add)
+        [[ -f "$KIMG" ]] || { echo "90-uki-build: no kernel image in arguments: $*" >&2; exit 1; }
         [[ -f "$INITRD" ]] || exit 0   # dracut hook (90-dracut-install) runs before us
         [[ -s "$CMDLINE" ]] || { echo "90-uki-build: $CMDLINE missing" >&2; exit 0; }
         ukify build \

@@ -27,11 +27,14 @@ if ! pacman -Qi "$K" >/dev/null 2>&1; then
 fi
 
 CERT=/etc/kernel-signing/combined.pem
-WORKDIR=/home/will/kernel-rebuild
-LOG=/home/will/kernel-rebuild/$K.build.log
+# Build tree: $KERNEL_REBUILD_DIR, default kernel-rebuild in the building
+# user's home. signed-kernels-rebuild-all always passes it explicitly.
+WORKDIR="${KERNEL_REBUILD_DIR:-$HOME/kernel-rebuild}"
+LOG=$WORKDIR/$K.build.log
 UPSTREAM=https://gitlab.manjaro.org/packages/core/$K.git
 
 [[ -f $CERT ]] || { echo "missing cert: $CERT" >&2; exit 1; }
+[[ $WORKDIR =~ ^/[[:alnum:]._/@+-]+$ ]] || { echo "KERNEL_REBUILD_DIR must be an absolute path of letters, digits and ._/@+- : $WORKDIR" >&2; exit 2; }
 mkdir -p "$WORKDIR"
 cd "$WORKDIR"
 

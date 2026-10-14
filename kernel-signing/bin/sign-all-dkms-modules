@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Sign every DKMS-produced .ko in every installed kernel's extramodules dir
-# using the Will Module Signing Key. Safe to re-run; signing an already-
+# using /var/lib/dkms/mok.{key,pub}. Safe to re-run; signing an already-
 # signed module with the same key is a no-op that overwrites identically.
 set -u
 

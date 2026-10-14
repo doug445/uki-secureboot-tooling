@@ -1,6 +1,6 @@
 # systemd-boot + Secure Boot + UKI Migration Guide
 
-> **For Claude:** This document captures a complete, battle-tested migration from GRUB to
+> This document captures a complete, battle-tested migration from GRUB to
 > systemd-boot with UEFI Secure Boot and Unified Kernel Images (UKIs). It was derived from
 > two live sessions on a Manjaro system (nvme, LUKS2, Btrfs). Use the distro-specific
 > sections for package names and tooling differences. The "Gotchas" section at the end

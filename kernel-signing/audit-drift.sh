@@ -16,8 +16,8 @@ pairs=(
     "bin/refresh-rescue-kernel                 /usr/local/bin/refresh-rescue-kernel"
     "etc/pacman.d/hooks/80-sign-nvidia-modules.hook    /etc/pacman.d/hooks/80-sign-nvidia-modules.hook"
     "etc/pacman.d/hooks/81-sign-all-dkms-modules.hook  /etc/pacman.d/hooks/81-sign-all-dkms-modules.hook"
-    "etc/systemd/system/signed-kernels-check.service   /etc/systemd/system/signed-kernels-check.service"
-    "etc/systemd/system/signed-kernels-check.timer     /etc/systemd/system/signed-kernels-check.timer"
+    "etc/systemd/system/signed-kernels-check@.service  /etc/systemd/system/signed-kernels-check@.service"
+    "etc/systemd/system/signed-kernels-check@.timer    /etc/systemd/system/signed-kernels-check@.timer"
 )
 
 for pair in "${pairs[@]}"; do

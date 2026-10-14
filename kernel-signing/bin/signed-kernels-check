@@ -6,6 +6,10 @@
 
 set -u
 
+# signed-kernels-check@<user>.service runs this as that user, and systemd sets
+# no XDG_RUNTIME_DIR for system services; notify-send needs it to find the bus.
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
 RESULT_FILE=/var/lib/signed-kernels/check-status
 mkdir -p /var/lib/signed-kernels 2>/dev/null
 

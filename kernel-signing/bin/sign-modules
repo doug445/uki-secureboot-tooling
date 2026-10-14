@@ -7,8 +7,10 @@
 
 set -euo pipefail
 
-MOK_KEY="/var/lib/module-signing/mok.key"
-MOK_CERT="/var/lib/module-signing/mok.pem"
+# Same key pair as sign-all-dkms-modules and DKMS itself. Its certificate is
+# the one signed-kernel-build embeds via /etc/kernel-signing/combined.pem.
+MOK_KEY="/var/lib/dkms/mok.key"
+MOK_CERT="/var/lib/dkms/mok.pub"
 HASH="sha512"
 
 KVER="${1:-$(uname -r)}"
@@ -25,6 +27,21 @@ if [[ ! -d "$EXTRAMOD_DIR" ]]; then
     exit 1
 fi
 
+if [[ ! -r "$MOK_KEY" || ! -r "$MOK_CERT" ]]; then
+    echo "ERROR: signing key or certificate not readable: ${MOK_KEY} ${MOK_CERT}" >&2
+    exit 1
+fi
+
+# Signer identity (issuer CN + serial) that modinfo reports for a module
+# signed with MOK_CERT (DKMS writes it as DER). Empty if the certificate
+# can't be read, in which case nothing is skipped and every module is signed.
+cert_field() {
+    openssl x509 -inform DER -in "$MOK_CERT" -noout "$@" 2>/dev/null \
+        || openssl x509 -in "$MOK_CERT" -noout "$@" 2>/dev/null
+}
+MOK_SIGNER=$(cert_field -issuer -nameopt sep_multiline,lname,space_eq,utf8 | sed -n 's/^ *commonName = //p' || true)
+MOK_SERIAL=$(cert_field -serial | sed -n 's/^serial=//p' | sed 's/../&:/g; s/:$//' || true)
+
 signed=0
 skipped=0
 
@@ -39,7 +56,9 @@ for mod_zst in "${EXTRAMOD_DIR}"/*.ko.zst; do
     zstd -d -f -q "$mod_zst" -o "$mod_ko"
 
     # Check if already signed with our key
-    if modinfo "$mod_ko" 2>/dev/null | grep -q "Will Module Signing Key"; then
+    if [[ -n "$MOK_SERIAL" \
+          && "$(modinfo -F signer "$mod_ko" 2>/dev/null)" == "$MOK_SIGNER" \
+          && "$(modinfo -F sig_key "$mod_ko" 2>/dev/null)" == "$MOK_SERIAL" ]]; then
         echo "already signed, skipping"
         rm -f "$mod_ko"
         skipped=$((skipped + 1))

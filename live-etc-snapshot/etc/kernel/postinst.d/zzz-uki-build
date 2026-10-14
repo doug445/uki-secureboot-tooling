@@ -2,9 +2,9 @@
 # /etc/kernel/postinst.d/zzz-uki-build  (zzz- prefix so run-parts runs this AFTER initramfs-tools and zz-systemd-boot)
 # Apt kernel postinst hook — builds and signs a UKI for the new kernel.
 # Invoked by: dpkg, with $1 = kernel version, $2 = vmlinuz path.
-# Staging: unsigned UKI is built in /tmp (tmpfs); sbctl writes the signed result
-# directly to the ESP via `sbctl sign -o`, so /boot only ever holds completed,
-# signed UKIs (no half-written intermediates on the FAT32 ESP).
+# Staging: the unsigned UKI is built in /tmp (tmpfs), copied to its final path on
+# the ESP and signed there with `sbctl sign -s`, so sbctl registers that path. If
+# copying or signing fails, the previous UKI is put back (or the new one removed).
 set -euo pipefail
 
 # dpkg postinst hands us a minimal PATH (/usr/sbin:/usr/bin:/sbin:/bin) — add
@@ -38,7 +38,8 @@ UKI="$OUTDIR/linuxmint-${KVER}.efi"
 
 # Build unsigned UKI off-ESP so a mid-write failure can't leave a partial on /boot.
 TMP_UKI=$(mktemp --tmpdir "uki-linuxmint-${KVER}.XXXXXX.efi")
-trap '/bin/rm -f "$TMP_UKI"' EXIT
+OLD_UKI=$(mktemp --tmpdir "uki-linuxmint-${KVER}.old.XXXXXX.efi")
+trap '/bin/rm -f "$TMP_UKI" "$OLD_UKI"' EXIT
 
 ukify build \
     --linux "$KIMG" \
@@ -51,10 +52,24 @@ if ! command -v sbctl >/dev/null; then
     echo "90-uki-build: sbctl not installed — refusing to copy unsigned UKI to /boot" >&2
     exit 1
 fi
-# Two-pass: first sign writes the signed PE directly to /boot; second `-s` re-signs in
-# place so the *final* path lands in sbctl's db (otherwise -s would save the /tmp input).
-sbctl sign -o "$UKI" "$TMP_UKI"
-sbctl sign -s "$UKI" >/dev/null
+# Sign in place at the final path with -s, so sbctl's db records $UKI itself.
+# sbctl 0.15-0.18 save only files they actually sign: `sign -s` on an already
+# signed file prints "File has already been signed" and saves nothing, so the
+# old `sign -o "$UKI"` + `sign -s "$UKI"` pair never registered $UKI and
+# sign-all / rotate-keys skipped it. Keep the previous UKI in tmpfs until the
+# new one is signed, so a failure never leaves an unsigned UKI on /boot.
+had_old=0
+if [[ -f "$UKI" ]]; then cp "$UKI" "$OLD_UKI"; had_old=1; fi
+if ! { cp "$TMP_UKI" "$UKI" && sbctl sign -s "$UKI" >/dev/null; }; then
+    if (( had_old )); then
+        cp "$OLD_UKI" "$UKI"
+        echo "90-uki-build: copying or signing $UKI failed — previous UKI restored" >&2
+    else
+        /bin/rm -f "$UKI"
+        echo "90-uki-build: copying or signing $UKI failed — unsigned UKI removed" >&2
+    fi
+    exit 1
+fi
 
 echo "90-uki-build: signed UKI written → $UKI"
 

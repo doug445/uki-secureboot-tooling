@@ -570,8 +570,10 @@ by the mkinitcpio/dracut hook but not added to the database. Directly edit the d
 
 ```bash
 sudo cat /var/lib/sbctl/files.json
-# Add entries manually in the same JSON format, or force re-registration:
-sudo sbctl sign -s --force /boot/EFI/Linux/...efi  # if --force is available in your version
+# Add entries manually in the same JSON format, or strip the signature and re-sign
+# (sbctl has no --force; 0.15-0.18 only register files they actually sign):
+sudo sbattach --remove /boot/EFI/Linux/...efi
+sudo sbctl sign -s /boot/EFI/Linux/...efi
 ```
 
 ### 6g. Verify systemd-boot discovers the UKIs

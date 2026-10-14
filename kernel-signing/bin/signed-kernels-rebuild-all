@@ -25,6 +25,15 @@ if [[ $EUID -ne 0 ]]; then
     echo "run as root (needed for pacman -U)" >&2; exit 1
 fi
 
+# makepkg won't run as root, so every kernel is built as this user.
+BUILD_USER=will
+BUILD_HOME=$(getent passwd "$BUILD_USER" | cut -d: -f6)
+[[ -n $BUILD_HOME ]] || { echo "build user '$BUILD_USER' not found — edit BUILD_USER" >&2; exit 1; }
+# Build tree shared with signed-kernel-build, resolved once here and passed
+# to it explicitly so the install below reads the tree that was just built.
+KERNEL_REBUILD_DIR="${KERNEL_REBUILD_DIR:-$BUILD_HOME/kernel-rebuild}"
+[[ $KERNEL_REBUILD_DIR =~ ^/[[:alnum:]._/@+-]+$ ]] || { echo "KERNEL_REBUILD_DIR must be an absolute path of letters, digits and ._/@+- : $KERNEL_REBUILD_DIR" >&2; exit 2; }
+
 # discover installed Manjaro versioned kernels
 mapfile -t ALL < <(pacman -Qq 2>/dev/null | grep -E '^linux[0-9]+$' | sort)
 
@@ -82,14 +91,15 @@ fi
 
 echo "=== rebuilding: ${need[*]} ==="
 
-# Build each as user 'will' (makepkg won't run as root)
+# Build each as $BUILD_USER. The env prefix runs after su's login profile,
+# so the build cannot pick a different tree from the one installed below.
 failures=()
 for K in "${need[@]}"; do
     echo
     echo "=== $K: BUILD ==="
-    if su - will -c "/usr/local/bin/signed-kernel-build $K"; then
+    if su - "$BUILD_USER" -c "/usr/bin/env KERNEL_REBUILD_DIR=$KERNEL_REBUILD_DIR /usr/local/bin/signed-kernel-build $K"; then
         echo "=== $K: INSTALL ==="
-        cd /home/will/kernel-rebuild/$K
+        cd "$KERNEL_REBUILD_DIR/$K" || { failures+=("$K:install"); continue; }
         pacman -U --noconfirm --overwrite='*' ./*.pkg.tar.zst || failures+=("$K:install")
     else
         failures+=("$K:build")

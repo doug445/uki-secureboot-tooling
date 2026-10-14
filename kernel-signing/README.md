@@ -34,6 +34,17 @@ kernel-signing/
 
 All `/usr/local/bin/*` scripts are `chattr +i` after install. `deploy.sh` removes the immutable bit, installs, and re-applies it.
 
+## Build directory (`KERNEL_REBUILD_DIR`)
+
+`signed-kernel-build` clones each kernel into `$KERNEL_REBUILD_DIR/<kernel>`, builds it there and logs to `$KERNEL_REBUILD_DIR/<kernel>.build.log`. `signed-kernels-rebuild-all` installs the packages from that same directory.
+
+- **Default:** `kernel-rebuild` in the build user's home. Run by hand, `signed-kernel-build` uses `$HOME/kernel-rebuild`. `sudo signed-kernels-rebuild-all` uses `~<build user>/kernel-rebuild` (never `/root`), then passes the path to the build explicitly, so the build and the install always use the same tree.
+- **Override:** `KERNEL_REBUILD_DIR=/path signed-kernel-build linux612`, or `sudo KERNEL_REBUILD_DIR=/path signed-kernels-rebuild-all`. Set the variable after `sudo`, because sudo drops your environment. `signed-kernels-rebuild-all` passes its own value to the build, so a value set in your shell profile does not apply to it.
+- The path must be absolute and contain only letters, digits and `. _ / @ + -`. kbuild cannot build in a path with spaces or colons. The build user must be able to write to it.
+- `signed-kernels-rebuild-all` builds as the user in `BUILD_USER` near the top of the script, because makepkg refuses to run as root. Set `BUILD_USER` to your own account before running `./deploy.sh`.
+
+Existing trees need no migration. The default is the same `kernel-rebuild` directory in the build user's home that earlier versions hard-coded. Each run re-clones the kernel, so moving to a new path needs no migration either. Old logs stay in the old directory.
+
 ## Related files NOT in this suite (by design)
 - `/etc/kernel-signing/combined.pem` — the MOK public key, managed separately with its private half at `/var/lib/dkms/mok.key` (NOT backed up here; kept offline, on separate storage).
 - `/etc/dkms/framework.conf` — DKMS config; may have user edits unrelated to signing.

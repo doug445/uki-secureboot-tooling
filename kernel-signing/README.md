@@ -18,7 +18,7 @@ kernel-signing/
 │   ├── sign-modules                    — sign NVIDIA .ko files for one kernel
 │   ├── sign-all-dkms-modules           — catch-all: signs every /usr/lib/modules/*/extramodules
 │   ├── signed-kernel-build             — rebuild linux-* from Arch sources with trusted key
-│   ├── signed-kernel-ignorepkg-sync    — keep /etc/pacman.conf IgnorePkg list in sync
+│   ├── signed-kernel-ignorepkg-sync    — set IgnorePkg to the installed kernels (manual; see below)
 │   ├── signed-kernels-check            — compare installed kernels with upstream PKGBUILDs
 │   ├── signed-kernels-rebuild-all      — re-run the build pipeline for every kernel
 │   └── refresh-rescue-kernel           — regenerate the rescue UKI
@@ -54,6 +54,20 @@ The weekly check is a template unit, `signed-kernels-check@<user>.timer`. It run
 **Migrating from the old timer.** Earlier versions installed `signed-kernels-check.service` and `.timer` with `User=will` hard-coded. On its next run, `deploy.sh` disables and removes those two units, enables `signed-kernels-check@<user>.timer` in their place, and prints `MIGRATED: …`. If the old timer was masked, `deploy.sh` leaves it masked, enables nothing, and says so. The unit's `StateDirectory=` makes `/var/lib/signed-kernels` writable by the check user.
 
 `signed-kernel-ignorepkg-sync` runs as root with no session of its own. It notifies every logged-in user who has a session bus and a UID of at least `UID_MIN`.
+
+## `signed-kernel-ignorepkg-sync` is a manual tool
+
+`deploy.sh` installs it, but no hook, timer or other script runs it. Its header says it was written for a pacman hook, but that hook was never part of this repository. Run it yourself after installing a new `linuxNN`, so that `pacman -Syu` keeps the signed build instead of replacing it with the repo kernel:
+
+```
+sudo signed-kernel-ignorepkg-sync
+grep -n IgnorePkg /etc/pacman.conf     # check the result
+```
+
+It sets `IgnorePkg` to every installed `linuxNN` and `linuxNN-headers`, then notifies logged-in users that a signed rebuild is needed. Before you run it, know two things:
+
+- **It rewrites the whole `IgnorePkg` line.** Every other entry on that line is dropped, such as nvidia userspace held back in step with its kernel module. Add those entries back by hand afterwards.
+- **It needs an `IgnorePkg` line or a commented `#IgnorePkg` stub.** If `pacman.conf` has neither, it changes nothing but still prints `updated: IgnorePkg = …`. Stock Manjaro and Arch `pacman.conf` files have the stub.
 
 ## Related files NOT in this suite (by design)
 - `/etc/kernel-signing/combined.pem` — the MOK public key, managed separately with its private half at `/var/lib/dkms/mok.key` (NOT backed up here; kept offline, on separate storage).

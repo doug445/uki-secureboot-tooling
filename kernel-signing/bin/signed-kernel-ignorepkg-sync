@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-# Read pacman hook targets from stdin (one package per line), update
-# /etc/pacman.conf IgnorePkg to include every currently-installed linuxNN +
-# linuxNN-headers, notify user to rebuild.
+# Set /etc/pacman.conf IgnorePkg to every currently-installed linuxNN +
+# linuxNN-headers, then notify logged-in users to rebuild.
+# MANUAL TOOL: run `sudo signed-kernel-ignorepkg-sync` after installing a new
+# linuxNN. It was written for a pacman hook that was never part of this repo,
+# and nothing calls it (it does not read hook targets from stdin either).
+# Read the README first: it REWRITES the whole IgnorePkg line, dropping any
+# other entry, and with neither an IgnorePkg line nor a #IgnorePkg stub in
+# pacman.conf it changes nothing yet still prints "updated".
 set -u
 
 # collect every installed Manjaro versioned kernel + its headers

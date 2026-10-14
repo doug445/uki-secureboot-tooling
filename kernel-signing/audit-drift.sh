@@ -42,7 +42,7 @@ fi
 echo "[kernel-signing] $(date -Is) — drift=$drift missing=$missing"
 if [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]] && command -v notify-send >/dev/null; then
     notify-send -u critical "kernel-signing audit" "${#mismatches[@]} drift, $missing missing
-Review ~/Projects/kernel-signing/ vs deployed."
+Review $HERE/ vs deployed."
 fi
 (( missing )) && exit 2
 exit 1

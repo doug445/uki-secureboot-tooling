@@ -36,3 +36,8 @@ System Volume Information/
 FOUND.*
 lost+found/
 .DS_Store
+
+# --- Backup copies (editor/agent hooks, deploy.sh's .bak-<epoch>) ---
+*.bak
+*.bak-*
+*.bak.*

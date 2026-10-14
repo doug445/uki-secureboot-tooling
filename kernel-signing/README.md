@@ -1,6 +1,8 @@
 # kernel-signing
 
-Source-of-record for the custom ECDSA MOK-based kernel/module signing pipeline.
+Source-of-record for the custom MOK-based kernel/module signing pipeline.
+
+Out-of-tree modules are signed with one key: the DKMS module signing key, `/var/lib/dkms/mok.{key,pub}` (RSA-2048, `CN=DKMS module signing key`). `signed-kernel-build` embeds its certificate, `/etc/kernel-signing/combined.pem`, in each custom kernel's trusted keyring. A public copy is in `../kernel-signing-backup/combined.pem`.
 
 **Do not run from here — deployed copies are canonical. Edit → `./deploy.sh`.**
 
@@ -72,4 +74,5 @@ It sets `IgnorePkg` to every installed `linuxNN` and `linuxNN-headers`, then not
 ## Related files NOT in this suite (by design)
 - `/etc/kernel-signing/combined.pem` — the MOK public key, managed separately with its private half at `/var/lib/dkms/mok.key` (NOT backed up here; kept offline, on separate storage).
 - `/etc/dkms/framework.conf` — DKMS config; may have user edits unrelated to signing.
+- `../kernel-signing-backup/mok.pem` is an older certificate, "Will Module Signing Key" (ECDSA P-256). No script uses it any more: `sign-modules` signed with that key, from `/var/lib/module-signing/`, until it moved to `/var/lib/dkms/mok.*`. It is not in `combined.pem`, so the custom kernels don't trust it. It is kept as a record.
 

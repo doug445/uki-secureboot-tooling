@@ -11,7 +11,7 @@ in sync as kernels and drivers change.
 |------|------------|
 | `uki-secureboot-kit/` | The deployable kit. Numbered install steps in `bin/` (`00-detect` → `99-rollback`), per-distro glue in `distro/{arch,fedora,mint}/`, `hardening/` drop-ins, `live-usb/` recovery notes, plus `DEPLOYMENT.md` and `GOTCHAS.md`. |
 | `kernel-signing/` | Arch/pacman kernel + DKMS module signing: `bin/` signers, `etc/pacman.d/hooks/` (sign nvidia + all DKMS modules), a `signed-kernels-check` systemd timer, `deploy.sh`, and `audit-drift.sh`. |
-| `kernel-signing-backup/` | **Public** Secure Boot certificates only (`mok.pem`, `combined.pem`) — the enrolled db/MOK certs, no private keys. |
+| `kernel-signing-backup/` | **Public** certificates only, no private keys. `combined.pem` is the DKMS module signing key (RSA-2048) that `kernel-signing/` embeds in its custom kernels as `CONFIG_SYSTEM_TRUSTED_KEYS`. `mok.pem` is an older ECDSA "Will Module Signing Key" that no script uses any more, kept as a record. |
 | `live-etc-snapshot/` | Snapshot of the currently-deployed pipeline on the Mint box, under real paths: the kernel `postinst.d`/`postrm.d` UKI build+cleanup hooks, the `initramfs/post-update.d/zz-uki-rebuild` guard hook, `sign-systemd-boot`, `dkms/framework.conf`, and the kernel `cmdline`. |
 
 ## The `zz-uki-rebuild` guard hook

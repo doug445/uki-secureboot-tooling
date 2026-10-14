@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NVRM: API mismatch after NVIDIA update with a signed UKI</title>
+<meta name="description" content="After an NVIDIA update you boot to a TTY with NVRM: API mismatch. Your signed UKI still holds the old driver. Confirm it, rebuild and re-sign, then add a hook.">
+<link rel="canonical" href="https://doug445.github.io/uki-secureboot-tooling/nvrm-api-mismatch-after-nvidia-update-uki/">
+<meta name="author" content="William MacKinnon">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="../style.css">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="uki-secureboot-tooling">
+<meta property="og:title" content="NVRM: API mismatch after NVIDIA update with a signed UKI">
+<meta property="og:description" content="After an NVIDIA update you boot to a TTY with NVRM: API mismatch. Your signed UKI still holds the old driver. Confirm it, rebuild and re-sign, then add a hook.">
+<meta property="og:url" content="https://doug445.github.io/uki-secureboot-tooling/nvrm-api-mismatch-after-nvidia-update-uki/">
+<meta property="og:image" content="https://doug445.github.io/uki-secureboot-tooling/card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="article:published_time" content="2026-10-14">
+<meta property="article:modified_time" content="2026-10-14">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "NVRM: API mismatch after an NVIDIA update, and the PC boots to a TTY with Secure Boot",
+      "description": "After an NVIDIA update you boot to a TTY with NVRM: API mismatch. Your signed UKI still holds the old driver. Confirm it, rebuild and re-sign, then add a hook.",
+      "datePublished": "2026-10-14",
+      "dateModified": "2026-10-14",
+      "image": "https://doug445.github.io/uki-secureboot-tooling/card.png",
+      "author": { "@type": "Person", "name": "William MacKinnon", "url": "https://github.com/doug445" },
+      "mainEntityOfPage": "https://doug445.github.io/uki-secureboot-tooling/nvrm-api-mismatch-after-nvidia-update-uki/",
+      "about": { "@type": "SoftwareApplication", "name": "uki-secureboot-tooling", "url": "https://doug445.github.io/uki-secureboot-tooling/", "applicationCategory": "SecurityApplication", "operatingSystem": "Linux (Arch, Fedora, Debian/Ubuntu/Mint families)" }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "uki-secureboot-tooling", "item": "https://doug445.github.io/uki-secureboot-tooling/" },
+        { "@type": "ListItem", "position": 2, "name": "NVRM API mismatch", "item": "https://doug445.github.io/uki-secureboot-tooling/nvrm-api-mismatch-after-nvidia-update-uki/" }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "Why does sbctl verify report the stale UKI as signed?", "acceptedAnswer": { "@type": "Answer", "text": "Because it is signed. sbctl verify checks that each file carries a valid signature from your db key, and the old UKI was signed correctly when it was built. A passing verify tells you the firmware will accept the file, not that the initramfs inside it matches the driver now installed in /lib/modules." } },
+        { "@type": "Question", "name": "Will a plain reboot fix NVRM: API mismatch?", "acceptedAnswer": { "@type": "Answer", "text": "Only if you have not rebooted since the update, because then the old module is simply still loaded. If you have rebooted and the mismatch persists on a UKI system with the NVIDIA modules in the initramfs, the old module is being loaded from inside the UKI, and only a rebuilt and re-signed UKI changes that." } },
+        { "@type": "Question", "name": "Can I avoid this by keeping the NVIDIA modules out of the initramfs?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Without them in the initramfs, the modules load from /lib/modules after the root filesystem is mounted, so they always match the installed driver. The cost is later loading: the Arch Wiki recommends early loading when the nvidia module would otherwise load after the display manager. If you keep early loading, you need a hook that rebuilds the UKI whenever the initramfs changes." } },
+        { "@type": "Question", "name": "Why did my kernel postinst hook not rebuild the UKI?", "acceptedAnswer": { "@type": "Answer", "text": "Scripts in /etc/kernel/postinst.d run when a kernel package is installed or upgraded. A driver-only update installs no kernel package, so the hook never runs, even though DKMS rebuilt the module and the driver package regenerated the initramfs. On initramfs-tools systems the place that does run in that case is /etc/initramfs/post-update.d, which update-initramfs calls every time it writes an initramfs." } },
+        { "@type": "Question", "name": "Is this the same problem as an NVIDIA module rejected under Secure Boot?", "acceptedAnswer": { "@type": "Answer", "text": "No. A rejected module never loads at all: that happens when the kernel enforces module signatures and the DKMS-built module is not signed with a key the kernel trusts. With an API mismatch the module loads fine; it is just the wrong version. The fix for a rejected module is module signing, not a UKI rebuild." } }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+
+<nav class="sitenav" aria-label="Site">
+  <div class="wrap">
+    <a class="brand" href="../">uki-secureboot-tooling</a>
+    <a href="../nvrm-api-mismatch-after-nvidia-update-uki/">NVRM API mismatch</a>
+    <a href="https://github.com/doug445/uki-secureboot-tooling">GitHub</a>
+  </div>
+</nav>
+
+<main class="wrap">
+<p class="crumbs"><a href="../">uki-secureboot-tooling</a> › NVRM API mismatch</p>
+<h1>NVRM: API mismatch after an NVIDIA update, and the PC boots to a TTY with Secure Boot</h1>
+<p class="lede">You updated the NVIDIA driver, rebooted, and got a text console instead of a login screen. The kernel log says <code>NVRM: API mismatch</code>, and nothing changed except the driver. If you boot a signed Unified Kernel Image (UKI), the likely cause is that the UKI still carries the old NVIDIA module. This page shows how to confirm that, fix it by hand on Debian/Ubuntu/Mint, Fedora and Arch, and stop it happening again.</p>
+
+<h2 id="symptom">What you are seeing</h2>
+<p>The NVIDIA driver has two halves that must be the same version: the kernel module (<code>nvidia.ko</code> and friends) and the userspace libraries that Xorg, Wayland compositors and <code>nvidia-smi</code> load. When the userspace side talks to a kernel module of a different version, the module logs a line that starts with <code>NVRM: API mismatch</code> and names both versions: the client (userspace) version and the kernel module version. The display server fails to start and the display manager gives up, which leaves you at a TTY.</p>
+<p>The usual cause is not having rebooted after an update, so the old module is still in memory. If you did reboot and it still happens, and your system boots a signed UKI, read on.</p>
+
+<h2 id="cause">Why a signed UKI keeps the old driver</h2>
+<p>A UKI is one EFI binary that contains the kernel, the initramfs and the kernel command line, signed as one unit. Secure Boot verifies the whole file, which is the point: nobody can swap the initramfs or edit the command line. It also means the initramfs inside the UKI changes only when someone rebuilds and re-signs the UKI.</p>
+<p>A driver-only update, such as an <code>nvidia-dkms</code> version bump, does this:</p>
+<div class="table-scroll"><table>
+<thead><tr><th>Component</th><th>Where it lives</th><th>Updated by a driver-only update?</th></tr></thead>
+<tbody>
+<tr><td>NVIDIA userspace libraries</td><td>the driver packages</td><td>Yes</td></tr>
+<tr><td>NVIDIA kernel module</td><td><code>/lib/modules/&lt;kernel&gt;/</code>, built by DKMS</td><td>Yes</td></tr>
+<tr><td>Standalone initramfs</td><td>for example <code>/boot/initrd.img-&lt;kernel&gt;</code></td><td>Yes. On Debian-family systems the NVIDIA DKMS package's postinst typically runs <code>update-initramfs -u</code></td></tr>
+<tr><td>Signed UKI</td><td><code>EFI/Linux/*.efi</code> on the ESP or XBOOTLDR</td><td><strong>No</strong>, if your UKI builder only runs on kernel-package installs</td></tr>
+</tbody>
+</table></div>
+<p>On Debian, Ubuntu and Mint, a typical UKI builder is a script in <code>/etc/kernel/postinst.d/</code>. Those scripts run when a <em>kernel</em> package is installed. A driver update installs no kernel package, so the builder never runs. The UKI on the ESP still contains the initramfs from the last kernel install, with the old NVIDIA module in it.</p>
+<p>At boot, if the NVIDIA modules are in the initramfs (early loading, often set up so the driver is ready before the display manager starts), the kernel loads the old module from inside the UKI. That module stays loaded when the root filesystem is mounted. Userspace is the new version. The result is <code>NVRM: API mismatch</code> and a TTY.</p>
+<p>The UKI is still validly signed, so Secure Boot does not complain and nothing tells you it is stale.</p>
+
+<h2 id="confirm">Confirm it on your machine</h2>
+<p>Log in on the TTY. First compare the version of the module that is <em>loaded</em> with the version of the module <em>on disk</em> for the running kernel:</p>
+<div class="codeblock"><pre><code>uname -r
+cat /sys/module/nvidia/version
+modinfo -F version nvidia
+sudo dkms status</code></pre></div>
+<p><code>/sys/module/nvidia/version</code> is the module in memory. <code>modinfo</code> searches <code>/lib/modules</code> for the running kernel and reports the file on disk. <code>dkms status</code> lists what DKMS built and for which kernel. If the loaded version is older than the on-disk version and you have rebooted since the update, the old module came from somewhere other than <code>/lib/modules</code>. On a UKI system, that is the initramfs inside the UKI.</p>
+<p>Check the kernel log for the mismatch itself:</p>
+<div class="codeblock"><pre><code>sudo journalctl -k | grep NVRM</code></pre></div>
+<p>Next, find the UKI you booted. <code>bootctl list</code> shows every entry systemd-boot can see, with a <code>source:</code> path for each:</p>
+<div class="codeblock"><pre><code>sudo bootctl list</code></pre></div>
+<p>Set <code>UKI</code> to the source path of the entry for your running kernel, for example <code>UKI=/boot/efi/EFI/Linux/linuxmint-$(uname -r).efi</code>. Then compare the UKI's build time with the module file's time:</p>
+<div class="codeblock"><pre><code>sudo stat -c '%y  %n' "$UKI" "$(modinfo -F filename nvidia)"
+sudo ukify inspect "$UKI" --section=.uname:text</code></pre></div>
+<p>If the UKI is older than the module, it was built before the driver update. <code>ukify inspect</code> prints the embedded <code>.uname</code> section, which should match <code>uname -r</code>; it confirms you are looking at the right file.</p>
+<p>Optionally, check that the NVIDIA modules really are in the UKI's initramfs. Recent <code>ukify</code> can save a section to a file:</p>
+<div class="codeblock"><pre><code>sudo ukify inspect "$UKI" --section=.initrd:binary@/tmp/uki-initrd.img</code></pre></div>
+<p>Then list it with your initramfs tool: <code>lsinitrd /tmp/uki-initrd.img | grep nvidia</code> on dracut systems (Fedora), or <code>lsinitcpio /tmp/uki-initrd.img | grep nvidia</code> on mkinitcpio systems (Arch). Debian-family systems have an equivalent lister in initramfs-tools. If the lister cannot read the file, skip this step; the version and timestamp checks are enough. If NVIDIA is not in the initramfs at all, a stale UKI cannot be the cause, and you should look for a driver package that did not finish installing.</p>
+<p>Last, <code>sbctl</code>:</p>
+<div class="codeblock"><pre><code>sudo sbctl status
+sudo sbctl verify</code></pre></div>
+<p>Expect the stale UKI to show as signed. <code>sbctl verify</code> checks that files carry a valid signature from your db key; it cannot tell you whether the contents are current. You use it after the rebuild to make sure the new UKI is signed before you reboot.</p>
+
+<h2 id="fix">Fix it by hand</h2>
+<p>The fix is the same on every distribution: make sure the module is built for your kernel, regenerate the initramfs, rebuild the UKI from it, and sign the new UKI with your db key. Only the tools differ.</p>
+
+<h3>First, keep a way back</h3>
+<p>Before you overwrite anything, make sure you can boot if the new UKI is bad. Two options:</p>
+<ul>
+<li><strong>A BLS fallback entry.</strong> If you kept Type #1 entries (<code>*-fallback.conf</code> in <code>loader/entries/</code>) that boot a loose <code>vmlinuz</code> with the standalone initramfs, pick one at the systemd-boot menu. The driver update already regenerated that initramfs, so it carries the new module. Under Secure Boot the <code>vmlinuz</code> must be signed; the initramfs and command line in such an entry are not covered by Secure Boot, so treat it as a rescue path only.</li>
+<li><strong>A copy of the current UKI.</strong> A copy keeps its signature, and systemd-boot lists every <code>.efi</code> in <code>EFI/Linux/</code> as an entry. It still boots to the TTY, but it boots. Check free space first with <code>df -h "$(dirname "$UKI")"</code>, because each UKI can be a few hundred megabytes.</li>
+</ul>
+<div class="codeblock"><pre><code>sudo cp "$UKI" "${UKI%.efi}-previous.efi"</code></pre></div>
+
+<h3>Debian, Ubuntu and Linux Mint (initramfs-tools + ukify)</h3>
+<div class="codeblock"><pre><code>KVER=$(uname -r)
+sudo dkms status
+sudo update-initramfs -u -k "$KVER"</code></pre></div>
+<p>If <code>dkms status</code> does not show the new NVIDIA version as installed for <code>$KVER</code>, fix that first; rebuilding the UKI from an initramfs without the module helps nobody. If you installed the guard hook described below, <code>update-initramfs</code> has already rebuilt and re-signed the UKI. Otherwise, build it from the fresh initramfs and sign it onto the ESP:</p>
+<div class="codeblock"><pre><code>sudo ukify build --linux "/boot/vmlinuz-$KVER" --initrd "/boot/initrd.img-$KVER" --cmdline @/etc/kernel/cmdline --uname "$KVER" --output /tmp/uki-new.efi
+sudo sbctl sign -o "$UKI" /tmp/uki-new.efi
+sudo sbctl verify "$UKI"</code></pre></div>
+<p>Building in <code>/tmp</code> and letting <code>sbctl sign -o</code> write the signed result to the final path means the ESP never holds an unsigned or half-written UKI. <code>/etc/kernel/cmdline</code> must hold your full command line on one line, without <code>initrd=</code> or <code>BOOT_IMAGE=</code>; editing that file changes nothing until the UKI is rebuilt.</p>
+<div class="note"><p>Some UKI-only setups delete <code>/boot/vmlinuz-$KVER</code> and <code>/boot/initrd.img-$KVER</code> after building, because both are inside the UKI. If <code>/boot/vmlinuz-$KVER</code> is missing, restore it from wherever your builder archives it, or run <code>sudo apt install --reinstall "linux-image-$KVER"</code>. Reinstalling the kernel package also re-runs your <code>/etc/kernel/postinst.d/</code> builder, which by then sees the new initramfs.</p></div>
+
+<h3>Fedora (dracut + ukify)</h3>
+<div class="codeblock"><pre><code>KVER=$(uname -r)
+sudo dracut --force "/boot/initramfs-$KVER.img" "$KVER"
+sudo ukify build --linux "/lib/modules/$KVER/vmlinuz" --initrd "/boot/initramfs-$KVER.img" --cmdline @/etc/kernel/cmdline --uname "$KVER" --output /tmp/uki-new.efi
+sudo sbctl sign -o "$UKI" /tmp/uki-new.efi
+sudo sbctl verify "$UKI"</code></pre></div>
+<p>Make sure the kernel module for <code>$KVER</code> is built before you run <code>dracut</code>. If you build UKIs with <code>dracut</code> itself (<code>uefi="yes"</code> in a <code>dracut.conf.d</code> file) rather than with <code>ukify</code>, dracut writes the UKI directly; sign that output with <code>sbctl</code> in the same way.</p>
+
+<h3>Arch, Manjaro, EndeavourOS (mkinitcpio)</h3>
+<div class="codeblock"><pre><code>sudo dkms status
+sudo mkinitcpio -P
+sudo sbctl sign-all
+sudo sbctl verify</code></pre></div>
+<p>On Arch the UKI is built by mkinitcpio itself from the <code>default_uki=</code> line in each preset under <code>/etc/mkinitcpio.d/</code>, so <code>mkinitcpio -P</code> regenerates the initramfs and the UKI together. sbctl ships a mkinitcpio post hook that signs the result; <code>sbctl sign-all</code> re-signs every file in sbctl's database and is harmless if they are already signed. If your presets also keep a <code>default_image=</code> line, the standalone initramfs is rebuilt too, which is what a BLS fallback entry needs.</p>
+
+<h3>Register the path, then reboot</h3>
+<p>Check that sbctl tracks the UKI path, so future <code>sbctl sign-all</code> runs and package hooks re-sign it:</p>
+<div class="codeblock"><pre><code>sudo sbctl list-files</code></pre></div>
+<p>If your UKI path is not listed, sign it in place with <code>-s</code> so the final path is saved to the database. sbctl records a path when it actually signs the file, so give it the unsigned build at the final path:</p>
+<div class="codeblock"><pre><code>sudo cp /tmp/uki-new.efi "$UKI"
+sudo sbctl sign -s "$UKI"</code></pre></div>
+<p>Do not use <code>sbctl sign -s -o "$UKI" /tmp/uki-new.efi</code> for this. It saves the <em>input</em> path in <code>/tmp</code> to the database, which is useless after a reboot.</p>
+<p>Reboot into the new UKI. Then <code>cat /sys/module/nvidia/version</code> and <code>modinfo -F version nvidia</code> should print the same version, and your desktop should be back. Once it is, delete the <code>-previous.efi</code> copy.</p>
+
+<h2 id="prevent">Stop it happening again</h2>
+<p>The gap is a trigger problem: the UKI builder fires on kernel installs, but the initramfs changes on driver installs too. The fix is to rebuild the UKI every time the initramfs is regenerated.</p>
+
+<h3>initramfs-tools (Debian, Ubuntu, Mint): a post-update.d guard hook</h3>
+<p><code>update-initramfs</code> runs every script in <code>/etc/initramfs/post-update.d/</code> each time it writes an initramfs, passing the kernel version as <code>$1</code> and the new initramfs path as <code>$2</code>. One working design, the <code>zz-uki-rebuild</code> hook, works as follows:</p>
+<ol>
+<li>It exits quietly if no kernel version was passed.</li>
+<li>It exits if <code>DPKG_MAINTSCRIPT_PACKAGE</code> (set by dpkg for maintainer scripts) matches <code>linux-image-*</code>, <code>linux-image</code> or <code>kfreebsd-image-*</code>. On a kernel-package install, the <code>/etc/kernel/postinst.d/zzz-uki-build</code> builder already builds and signs the UKI as the last postinst.d step. Skipping here avoids a double build, and avoids deleting the loose <code>vmlinuz</code> out from under later postinst.d scripts in the same run.</li>
+<li>It exits if the builder is not executable.</li>
+<li>The builder needs the kernel image as its second argument. The hook uses <code>/boot/vmlinuz-$KVER</code> if present. Otherwise it copies it back from <code>/root/kernel-store/$KVER/vmlinuz</code>, an archive the builder keeps on the LUKS-encrypted root because this setup deletes loose kernels after each build. If neither exists, it logs and skips.</li>
+<li>It runs the builder with the kernel version and image. The builder reads the initramfs that <code>update-initramfs</code> just wrote and <code>/etc/kernel/cmdline</code>, builds an unsigned UKI in <code>/tmp</code>, signs it onto the ESP with <code>sbctl sign -o</code>, then runs <code>sbctl sign -s</code> on the final path so that path lands in sbctl's database. The builder never calls <code>update-initramfs</code>, so the hook cannot recurse.</li>
+<li>It is best-effort. It must never abort the driver package's maintainer script, so every failure is swallowed and it always exits 0. A failed rebuild prints a warning that the UKI may be stale.</li>
+</ol>
+<p>The core of it:</p>
+<div class="codeblock"><pre><code>#!/bin/sh
+set -u
+
+KVER="${1:-}"
+[ -n "$KVER" ] || exit 0
+
+case "${DPKG_MAINTSCRIPT_PACKAGE:-}" in
+    linux-image-*|linux-image|kfreebsd-image-*) exit 0 ;;
+esac
+
+BUILDER=/etc/kernel/postinst.d/zzz-uki-build
+[ -x "$BUILDER" ] || exit 0
+
+KIMG="/boot/vmlinuz-${KVER}"
+if [ ! -f "$KIMG" ]; then
+    ARCHIVED="/root/kernel-store/${KVER}/vmlinuz"
+    if [ -f "$ARCHIVED" ]; then
+        cp -f "$ARCHIVED" "$KIMG" || exit 0
+    else
+        echo "zz-uki-rebuild: no vmlinuz for $KVER (neither loose nor archived) -- skipping UKI refresh" &gt;&amp;2
+        exit 0
+    fi
+fi
+
+echo "zz-uki-rebuild: refreshing signed UKI for $KVER after initrd regeneration"
+if ! "$BUILDER" "$KVER" "$KIMG"; then
+    echo "zz-uki-rebuild: UKI refresh for $KVER failed (non-fatal); UKI may be stale" &gt;&amp;2
+fi
+
+exit 0</code></pre></div>
+<p>Two details carry weight. The builder in <code>postinst.d</code> is named <code>zzz-uki-build</code> because <code>run-parts</code> runs scripts in name order, and the builder must run after initramfs-tools and <code>zz-systemd-boot</code> have written the initramfs. And the builder refuses to copy an unsigned UKI to <code>/boot</code> if <code>sbctl</code> is missing.</p>
+
+<h3>Arch: UKI follows the initramfs, modules get signed by pacman hooks</h3>
+<p>Because mkinitcpio builds the UKI, every initramfs regeneration also rebuilds the UKI, and sbctl's pacman hook re-signs the files in its database after each transaction. If pacman did not regenerate the images after a DKMS update on your system, run <code>mkinitcpio -P</code> as above.</p>
+<p>The other Arch problem is module signatures. DKMS-built modules fail to load if the kernel enforces signed modules. For kernels built with your own key in <code>CONFIG_SYSTEM_TRUSTED_KEYS</code>, two pacman hooks keep the modules signed:</p>
+<ul>
+<li><code>80-sign-nvidia-modules.hook</code> fires after installs and upgrades of <code>linux*-nvidia</code>, <code>nvidia</code>, <code>nvidia-dkms</code> and <code>nvidia-utils</code>, and on changes to <code>usr/lib/modules/*/extramodules/nvidia*.ko*</code>. It runs a signer that decompresses each <code>.ko.zst</code> in the running kernel's <code>extramodules</code> directory, signs it with the kernel's <code>scripts/sign-file</code> (sha512), recompresses it, and skips modules already signed with that key.</li>
+<li><code>81-sign-all-dkms-modules.hook</code> is the broad net. It fires on any <code>.ko*</code> under <code>extramodules/</code> or <code>updates/dkms/</code>, and on kernel package changes. For every installed kernel it signs <code>.ko</code>, <code>.ko.zst</code>, <code>.ko.gz</code> and <code>.ko.xz</code> modules in both directories, re-runs <code>depmod</code>, and exits 0 if the key is missing so the pacman transaction never fails.</li>
+</ul>
+
+<h3>Fedora: no initramfs-only trigger yet</h3>
+<p>A common way to build UKIs on Fedora is a <code>kernel-install</code> plugin in <code>/etc/kernel/install.d/</code>. It runs on <code>kernel-install add</code> and <code>remove</code>, which means on kernel installs and removals, not on a driver-only initramfs rebuild. Until you have a trigger that fires on initramfs regeneration, re-run the Fedora steps above after every NVIDIA driver update, before you reboot.</p>
+
+<div class="tool"><p><strong>Automated:</strong> The <code>zz-uki-rebuild</code> guard hook described above comes from <a href="https://github.com/doug445/uki-secureboot-tooling">uki-secureboot-tooling</a>. It also ships the apt <code>postinst.d</code>/<code>postrm.d</code> hooks that build, sign and clean up UKIs on Mint, Ubuntu and Debian, a <code>kernel-install</code> plugin for Fedora, mkinitcpio presets for the Arch family, BLS fallback entries as a rescue path, and the Arch pacman hooks that sign DKMS modules. Everything is signed with your own <code>sbctl</code> keys. TPM2 sealing, TPM2-backed LUKS auto-unlock and PCR baselining are out of scope; the kit is built around passphrase-only LUKS.</p></div>
+
+<h2 id="faq">FAQ</h2>
+<details><summary>Why does sbctl verify report the stale UKI as signed?</summary><p>Because it is signed. sbctl verify checks that each file carries a valid signature from your db key, and the old UKI was signed correctly when it was built. A passing verify tells you the firmware will accept the file, not that the initramfs inside it matches the driver now installed in /lib/modules.</p></details>
+<details><summary>Will a plain reboot fix NVRM: API mismatch?</summary><p>Only if you have not rebooted since the update, because then the old module is simply still loaded. If you have rebooted and the mismatch persists on a UKI system with the NVIDIA modules in the initramfs, the old module is being loaded from inside the UKI, and only a rebuilt and re-signed UKI changes that.</p></details>
+<details><summary>Can I avoid this by keeping the NVIDIA modules out of the initramfs?</summary><p>Yes. Without them in the initramfs, the modules load from /lib/modules after the root filesystem is mounted, so they always match the installed driver. The cost is later loading: the Arch Wiki recommends early loading when the nvidia module would otherwise load after the display manager. If you keep early loading, you need a hook that rebuilds the UKI whenever the initramfs changes.</p></details>
+<details><summary>Why did my kernel postinst hook not rebuild the UKI?</summary><p>Scripts in /etc/kernel/postinst.d run when a kernel package is installed or upgraded. A driver-only update installs no kernel package, so the hook never runs, even though DKMS rebuilt the module and the driver package regenerated the initramfs. On initramfs-tools systems the place that does run in that case is /etc/initramfs/post-update.d, which update-initramfs calls every time it writes an initramfs.</p></details>
+<details><summary>Is this the same problem as an NVIDIA module rejected under Secure Boot?</summary><p>No. A rejected module never loads at all: that happens when the kernel enforces module signatures and the DKMS-built module is not signed with a key the kernel trusts. With an API mismatch the module loads fine; it is just the wrong version. The fix for a rejected module is module signing, not a UKI rebuild.</p></details>
+
+<h2 id="sources">Sources</h2>
+<ul>
+<li>ArchWiki, <a href="https://wiki.archlinux.org/title/Unified_kernel_image">Unified kernel image</a>: mkinitcpio presets with <code>default_uki=</code>, <code>mkinitcpio -P</code>, sbctl's mkinitcpio post hook and pacman hooks.</li>
+<li>ArchWiki, <a href="https://wiki.archlinux.org/title/Unified_Extensible_Firmware_Interface/Secure_Boot">Secure Boot</a>: <code>sbctl verify</code>, <code>sbctl sign -s</code>, the sbctl pacman hook.</li>
+<li>ArchWiki, <a href="https://wiki.archlinux.org/title/Dynamic_Kernel_Module_Support">Dynamic Kernel Module Support</a>: <code>dkms status</code>, unsigned DKMS modules under enforced module signing.</li>
+<li>ArchWiki, <a href="https://wiki.archlinux.org/title/NVIDIA">NVIDIA</a>: early loading of the NVIDIA modules from the initramfs.</li>
+<li>ArchWiki, <a href="https://wiki.archlinux.org/title/Mkinitcpio">mkinitcpio</a>: presets, <code>-P</code>, post hooks, <code>lsinitcpio</code>.</li>
+<li><a href="https://github.com/Foxboron/sbctl">sbctl</a> README and sbctl(8): <code>sign</code> (<code>-o</code>, <code>-s</code>), <code>sign-all</code>, <code>verify</code>, <code>list-files</code>.</li>
+<li><a href="https://www.freedesktop.org/software/systemd/man/latest/ukify.html">ukify(1)</a>: <code>build</code> options and <code>inspect --section=NAME:text|binary[@PATH]</code>.</li>
+<li><a href="https://www.freedesktop.org/software/systemd/man/latest/kernel-install.html">kernel-install(8)</a>, <a href="https://www.freedesktop.org/software/systemd/man/latest/bootctl.html">bootctl(1)</a>, <a href="https://www.freedesktop.org/software/systemd/man/latest/journalctl.html">journalctl(1)</a>.</li>
+<li>man7.org: <a href="https://man7.org/linux/man-pages/man8/modinfo.8.html">modinfo(8)</a> (<code>-F version</code>, <code>-F filename</code>), <a href="https://man7.org/linux/man-pages/man8/dracut.8.html">dracut(8)</a>, <a href="https://man7.org/linux/man-pages/man1/lsinitrd.1.html">lsinitrd(1)</a>, <a href="https://man7.org/linux/man-pages/man1/dpkg.1.html">dpkg(1)</a> (<code>DPKG_MAINTSCRIPT_PACKAGE</code>).</li>
+</ul>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p><strong>uki-secureboot-tooling</strong> by William MacKinnon
+      (<a href="https://github.com/doug445">doug445</a>) ·
+      <a href="https://github.com/doug445/uki-secureboot-tooling">Source on GitHub</a> ·
+      <a href="https://github.com/doug445/uki-secureboot-tooling/issues">Issues</a></p>
+    <p>Independent project. Not affiliated with NVIDIA, systemd, sbctl or any Linux distribution.</p>
+    <p>Copyright © 2026 William MacKinnon. Code under the MIT licence. Page last updated 14 October 2026.</p>
+  </div>
+</footer>
+
+<script>
+document.querySelectorAll('.codeblock').forEach(function (block) {
+  var btn = document.createElement('button');
+  btn.className = 'copy'; btn.type = 'button'; btn.textContent = 'Copy';
+  btn.addEventListener('click', function () {
+    navigator.clipboard.writeText(block.querySelector('code').innerText).then(function () {
+      btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = 'Copy'; }, 1500);
+    }).catch(function () { btn.textContent = 'Select + copy'; });
+  });
+  block.appendChild(btn);
+});
+</script>
+</body>
+</html>

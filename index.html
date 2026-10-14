@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signed UKI + Secure Boot on Linux Mint, Fedora and Arch</title>
+<meta name="description" content="Move a Linux machine to systemd-boot, Unified Kernel Images and Secure Boot with your own sbctl keys, and keep the signed UKIs in sync when kernels and DKMS drivers update.">
+<link rel="canonical" href="https://doug445.github.io/uki-secureboot-tooling/">
+<meta name="author" content="William MacKinnon">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="style.css">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="uki-secureboot-tooling">
+<meta property="og:title" content="Signed UKI + Secure Boot for Linux Mint, Fedora and Arch">
+<meta property="og:description" content="A distro-aware kit for systemd-boot, Unified Kernel Images and Secure Boot with your own keys, with a fallback boot path at every step and hooks that keep signed UKIs current through driver updates.">
+<meta property="og:url" content="https://doug445.github.io/uki-secureboot-tooling/">
+<meta property="og:image" content="https://doug445.github.io/uki-secureboot-tooling/card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "name": "uki-secureboot-tooling",
+      "description": "Distro-aware toolkit for converting a Linux machine to systemd-boot, Unified Kernel Images and UEFI Secure Boot with your own sbctl keys, signing UKIs and DKMS modules and keeping them in sync across kernel and driver upgrades.",
+      "applicationCategory": "SecurityApplication",
+      "operatingSystem": "Linux (Arch, Fedora, Debian/Ubuntu/Mint families)",
+      "license": "https://opensource.org/licenses/MIT",
+      "url": "https://doug445.github.io/uki-secureboot-tooling/",
+      "downloadUrl": "https://github.com/doug445/uki-secureboot-tooling",
+      "codeRepository": "https://github.com/doug445/uki-secureboot-tooling",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "author": { "@type": "Person", "name": "William MacKinnon", "url": "https://github.com/doug445" }
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "What happens if the signed UKI does not boot?", "acceptedAnswer": { "@type": "Answer", "text": "Every conversion keeps a fallback boot path. Phase 35 writes BLS Type #1 fallback entries that systemd-boot lists next to the UKIs, so you can boot the same kernel through the unsigned path, and GRUB, where present, stays installed and signed as a third fallback." } },
+        { "@type": "Question", "name": "Does it enroll keys or enable Secure Boot for me?", "acceptedAnswer": { "@type": "Answer", "text": "No. Enabling Secure Boot is a manual firmware step, and keys are enrolled only after a first successful systemd-boot test, with sbctl enroll-keys --microsoft." } },
+        { "@type": "Question", "name": "Does it set up TPM2 unlock?", "acceptedAnswer": { "@type": "Answer", "text": "No. TPM2 sealing, TPM2-backed LUKS auto-unlock and PCR baselining are out of scope; the kit is built around passphrase-only LUKS by design." } },
+        { "@type": "Question", "name": "Which distributions does it support?", "acceptedAnswer": { "@type": "Answer", "text": "The Arch family (Manjaro, Arch, EndeavourOS, Garuda, CachyOS) with mkinitcpio, the Fedora family (Fedora, Nobara, Bazzite) with dracut and ukify, and the Debian family (Linux Mint, Ubuntu, Debian, Pop!_OS) with initramfs-tools and ukify." } }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+
+<nav class="sitenav" aria-label="Site">
+  <div class="wrap">
+    <a class="brand" href="./">uki-secureboot-tooling</a>
+    <a href="nvrm-api-mismatch-after-nvidia-update-uki/">NVRM API mismatch</a>
+    <a href="https://github.com/doug445/uki-secureboot-tooling">GitHub</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">systemd-boot · UKI · Secure Boot · sbctl · MIT</p>
+    <h1>Signed Unified Kernel Images and Secure Boot, on Mint, Fedora and Arch</h1>
+    <p class="lede">
+      A distro-aware kit that moves a Linux machine to <strong>systemd-boot</strong>,
+      <strong>Unified Kernel Images</strong> (kernel, initramfs and command line signed as one
+      <code>.efi</code>) and <strong>Secure Boot with your own keys</strong> via
+      <code>sbctl</code>. It signs out-of-tree DKMS modules too, and keeps the signed UKIs in sync
+      when kernels and drivers change, so an NVIDIA update doesn't leave you at a TTY.
+    </p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/doug445/uki-secureboot-tooling">Get it on GitHub</a>
+      <a class="btn" href="#steps">The steps</a>
+      <a class="btn" href="nvrm-api-mismatch-after-nvidia-update-uki/">NVRM API mismatch?</a>
+    </div>
+    <ul class="facts" aria-label="At a glance">
+      <li>Free and open source</li><li>Arch · Fedora · Debian families</li><li>mkinitcpio · dracut · ukify</li>
+      <li>Fallback boot path kept</li><li>Passphrase-only LUKS</li>
+    </ul>
+  </div>
+</header>
+
+<main class="wrap">
+
+<h2 id="problems">Fix a specific problem</h2>
+<div class="cards">
+  <a class="card" href="nvrm-api-mismatch-after-nvidia-update-uki/"><strong>"NVRM: API mismatch" after an NVIDIA update</strong><span>Why a driver-only DKMS update leaves a signed UKI carrying the old module, and how to rebuild it and keep it current.</span></a>
+</div>
+
+<h2 id="distros">Supported distros</h2>
+<div class="table-scroll"><table>
+  <thead><tr><th>Family</th><th>IDs handled</th><th>initramfs</th><th>UKI builder</th></tr></thead>
+  <tbody>
+    <tr><td>Arch</td><td>manjaro, arch, endeavouros, garuda, cachyos</td><td>mkinitcpio</td><td>mkinitcpio (native)</td></tr>
+    <tr><td>Fedora</td><td>fedora, nobara, bazzite</td><td>dracut</td><td>ukify (kernel-install plugin)</td></tr>
+    <tr><td>Debian</td><td>linuxmint, ubuntu, debian, pop</td><td>initramfs-tools</td><td>ukify (apt postinst hook)</td></tr>
+  </tbody>
+</table></div>
+
+<h2 id="steps">The steps</h2>
+<p>Numbered phase scripts, run in order, with a reboot to test before anything is enforced:</p>
+<div class="codeblock"><pre><code>sudo bin/00-detect.sh                # report environment, no changes
+sudo bin/10-install-prereqs.sh       # sbctl, ukify, ...
+sudo bin/20-create-keys.sh           # sbctl create-keys
+sudo bin/30-install-systemd-boot.sh  # bootctl install + loader.conf
+sudo bin/35-generate-bls-fallback.sh # rescue entries you can boot if a UKI fails
+sudo bin/40-build-ukis.sh            # standalone initramfs AND UKIs
+sudo bin/50-sign-everything.sh       # sbctl sign -s
+sudo bin/60-verify.sh                # show state
+# reboot, pick "Linux Boot Manager", confirm the UKI boots;
+# then firmware Setup Mode → sbctl enroll-keys --microsoft → enable Secure Boot</code></pre></div>
+<p>Full procedure, with reboot points and recovery checkpoints:
+  <a href="https://github.com/doug445/uki-secureboot-tooling/blob/main/uki-secureboot-kit/DEPLOYMENT.md">DEPLOYMENT.md</a>.
+  Lessons that cost real debugging time:
+  <a href="https://github.com/doug445/uki-secureboot-tooling/blob/main/uki-secureboot-kit/GOTCHAS.md">GOTCHAS.md</a>.</p>
+
+<h2 id="safety">Safety model</h2>
+<ul>
+  <li><strong>A fallback boot path at every step.</strong> Phase 30 backs up your bootloader
+    configs. Phase 35 writes BLS Type #1 fallback entries that systemd-boot lists next to the
+    UKIs, so you can boot the same kernel through the unsigned path. GRUB, where present, stays
+    installed and signed as a third fallback.</li>
+  <li><strong>Nothing irreversible is automatic.</strong> It doesn't repartition, enable Secure
+    Boot in firmware or enroll keys for you. Keys are enrolled only after a first successful
+    systemd-boot test.</li>
+  <li><strong>UKIs stay current through driver updates.</strong> A guard hook fires on any
+    initramfs regeneration, not only on kernel-package installs, and rebuilds and re-signs the UKI.
+    On Arch, pacman hooks sign NVIDIA and every other DKMS module on upgrade.</li>
+  <li><strong>Out of scope:</strong> TPM2 sealing, TPM2-backed LUKS auto-unlock and PCR
+    baselining. The kit is built around passphrase-only LUKS by design.</li>
+</ul>
+<p><small>The repository tracks public Secure Boot certificates only. Private keys, LUKS header
+  dumps and captured host state are excluded by its <code>.gitignore</code>.</small></p>
+
+<h2 id="faq">FAQ</h2>
+<details>
+  <summary>What happens if the signed UKI does not boot?</summary>
+  <p>Every conversion keeps a fallback boot path. Phase 35 writes BLS Type #1 fallback entries
+    that systemd-boot lists next to the UKIs, so you can boot the same kernel through the unsigned
+    path, and GRUB, where present, stays installed and signed as a third fallback.</p>
+</details>
+<details>
+  <summary>Does it enroll keys or enable Secure Boot for me?</summary>
+  <p>No. Enabling Secure Boot is a manual firmware step, and keys are enrolled only after a first
+    successful systemd-boot test, with sbctl enroll-keys --microsoft.</p>
+</details>
+<details>
+  <summary>Does it set up TPM2 unlock?</summary>
+  <p>No. TPM2 sealing, TPM2-backed LUKS auto-unlock and PCR baselining are out of scope; the kit
+    is built around passphrase-only LUKS by design.</p>
+</details>
+<details>
+  <summary>Which distributions does it support?</summary>
+  <p>The Arch family (Manjaro, Arch, EndeavourOS, Garuda, CachyOS) with mkinitcpio, the Fedora
+    family (Fedora, Nobara, Bazzite) with dracut and ukify, and the Debian family (Linux Mint,
+    Ubuntu, Debian, Pop!_OS) with initramfs-tools and ukify.</p>
+</details>
+
+<p>Encrypting the disk too? <a href="https://doug445.github.io/LinuxLocker/">LinuxLocker</a>
+  rebuilds and re-signs UKIs as part of an in-place LUKS2 conversion.</p>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p><strong>uki-secureboot-tooling</strong> by William MacKinnon
+      (<a href="https://github.com/doug445">doug445</a>) ·
+      <a href="https://github.com/doug445/uki-secureboot-tooling">Source on GitHub</a></p>
+    <p>Independent project. Not affiliated with NVIDIA, systemd, sbctl or any Linux distribution.</p>
+    <p>Copyright © 2026 William MacKinnon. Code under the MIT licence. Page last updated 14 October 2026.</p>
+  </div>
+</footer>
+
+<script>
+document.querySelectorAll('.codeblock').forEach(function (block) {
+  var btn = document.createElement('button');
+  btn.className = 'copy'; btn.type = 'button'; btn.textContent = 'Copy';
+  btn.addEventListener('click', function () {
+    navigator.clipboard.writeText(block.querySelector('code').innerText).then(function () {
+      btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = 'Copy'; }, 1500);
+    }).catch(function () { btn.textContent = 'Select + copy'; });
+  });
+  block.appendChild(btn);
+});
+</script>
+</body>
+</html>

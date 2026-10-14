@@ -5,6 +5,7 @@
 #   add KVER ENTRY-DIR KERNEL-IMAGE [INITRD...]    remove KVER ENTRY-DIR
 # ENTRY-DIR ($BOOT/ENTRY-TOKEN/KVER/) is a directory, unused here and possibly
 # absent. By hand (README smoke test): add KVER KERNEL-IMAGE  /  remove KVER
+# Skips layout=uki and kernel images that are already UKIs (see README).
 set -euo pipefail
 
 COMMAND="${1:-}"
@@ -38,6 +39,22 @@ CMDLINE=/etc/kernel/cmdline
 case "$COMMAND" in
     add)
         [[ -f "$KIMG" ]] || { echo "90-uki-build: no kernel image in arguments: $*" >&2; exit 1; }
+        # kernel-install(8): with layout=uki, kernel-install builds the UKI itself
+        # (uki_generator=) and 90-uki-copy.install installs it, so a UKI built here
+        # would only duplicate that entry.
+        if [[ "${KERNEL_INSTALL_LAYOUT:-}" == uki ]]; then
+            echo "90-uki-build: layout=uki — kernel-install installs the UKI itself; skipping" >&2
+            exit 0
+        fi
+        # An image that is already a UKI (or a UKI add-on) must not be wrapped in
+        # another UKI. kernel-install >= 254 passes its type in
+        # KERNEL_INSTALL_IMAGE_TYPE; called by hand, ask bootctl.
+        ktype="${KERNEL_INSTALL_IMAGE_TYPE:-$(bootctl kernel-identify "$KIMG" 2>/dev/null || true)}"
+        case "$ktype" in
+            uki|addon)
+                echo "90-uki-build: $KIMG is not a plain kernel (type: $ktype); not wrapping it in a UKI — install it with layout=uki" >&2
+                exit 0 ;;
+        esac
         [[ -f "$INITRD" ]] || exit 0   # dracut hook (90-dracut-install) runs before us
         [[ -s "$CMDLINE" ]] || { echo "90-uki-build: $CMDLINE missing" >&2; exit 0; }
         ukify build \

@@ -52,6 +52,19 @@ The plugin handles **both** `kernel-install add` (build + sign UKI) and
 `kernel-install remove` (delete UKI + unregister from sbctl). No separate
 removal hook needed.
 
+On `add`, it builds nothing in two cases. Each prints a message and exits 0,
+so kernel-install continues with the next plugin:
+
+- **`layout=uki`.** kernel-install then builds the UKI itself, with the
+  generator set by `uki_generator=` in `install.conf`, and
+  `90-uki-copy.install` installs it as `$BOOT/EFI/Linux/<token>-<kver>.efi`.
+  This plugin would only add a duplicate. Use `layout=none` as above.
+- **The kernel image is already a UKI**, for example from `kernel-uki-virt`.
+  The plugin won't wrap a UKI inside another one. It takes the image type
+  from kernel-install (`KERNEL_INSTALL_IMAGE_TYPE`, systemd ≥ 254), or from
+  `bootctl kernel-identify` when run by hand. Install such kernels with
+  `layout=uki` and sign them with sbctl.
+
 Smoke test against the running kernel:
 ```
 sudo /etc/kernel/install.d/90-uki-build.install add $(uname -r) /lib/modules/$(uname -r)/vmlinuz

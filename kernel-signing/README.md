@@ -1,6 +1,6 @@
 # kernel-signing
 
-Source-of-record for the custom ECDSA MOK-based kernel/module signing pipeline. See memory `project_signed_kernel_pipeline.md` and `project_module_signing.md` for the full rationale.
+Source-of-record for the custom ECDSA MOK-based kernel/module signing pipeline.
 
 **Do not run from here — deployed copies are canonical. Edit → `./deploy.sh`.**
 
@@ -32,11 +32,9 @@ kernel-signing/
 └── README.md
 ```
 
-All `/usr/local/bin/*` scripts are `chattr +i` after install (per `project_signed_kernel_pipeline.md`). `deploy.sh` removes the immutable bit, installs, and re-applies it.
+All `/usr/local/bin/*` scripts are `chattr +i` after install. `deploy.sh` removes the immutable bit, installs, and re-applies it.
 
 ## Related files NOT in this suite (by design)
-- `/etc/kernel-signing/combined.pem` — the MOK public key, managed separately with its private half at `/var/lib/dkms/mok.key` (NOT backed up here; lives in a sealed drive per `project_module_signing.md`).
+- `/etc/kernel-signing/combined.pem` — the MOK public key, managed separately with its private half at `/var/lib/dkms/mok.key` (NOT backed up here; kept offline, on separate storage).
 - `/etc/dkms/framework.conf` — DKMS config; may have user edits unrelated to signing.
 
-## Backups of MOK key material
-`~/Projects/tpm2-uki-migration/backups/mok.{key,pem}` (outside this repo because it predates this convention and contains different key material from the Asahi migration).

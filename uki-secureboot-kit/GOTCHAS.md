@@ -32,8 +32,13 @@ Mix them up and the system boots to a Dracut-style emergency shell.
 ## 4. `sbctl sign -s` doesn't register if file is already signed
 
 If a file was signed by an automated hook (mkinitcpio's sbctl hook, ukify
-build hook), `sbctl sign -s /path` prints "already signed" and **does not**
-add the path to its database. Future re-signs will skip it.
+build hook), `sbctl sign -s /path` prints "File has already been signed" and
+**does not** add the path to its database. Future re-signs will skip it.
+
+This applies to sbctl 0.15–0.18. sbctl 0.14 and older re-signed the file and
+saved it. sbctl master after 0.18 saves it too (commit ae9c895, issue #482). So
+a hook that wants its output in the database must sign the **unsigned** file in
+place at its final path with `sign -s`, not sign with `-o` and register after.
 
 **Fix:** Either edit `/var/lib/sbctl/files.json` directly, or strip the
 signature and re-sign:

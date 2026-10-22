@@ -5,6 +5,8 @@ spanning Linux Mint, Fedora, and Arch. Builds UKIs, signs them (and out-of-tree
 DKMS modules) against an enrolled `sbctl` **db** key, and keeps the signed UKIs
 in sync as kernels and drivers change.
 
+Free and open source under the [MIT licence](LICENSE).
+
 **Guides:** [Signed UKI + Secure Boot on Mint, Fedora and Arch](https://doug445.github.io/uki-secureboot-tooling/) ·
 ["NVRM: API mismatch" after an NVIDIA update with a signed UKI](https://doug445.github.io/uki-secureboot-tooling/nvrm-api-mismatch-after-nvidia-update-uki/)
 
